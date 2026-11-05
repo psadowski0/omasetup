@@ -1,0 +1,101 @@
+#!/bin/bash
+# Omatweaks: small, reversible tweaks for Omarchy.
+set -euo pipefail
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: omatweaks <command>
+
+Commands:
+  list                  List available tweaks
+  <tweak> enable        Enable a tweak
+  <tweak> disable       Disable a tweak
+  <tweak> status        Show a tweak's state
+  update                Update this checkout
+  version               Show the installed version
+EOF
+  exit 2
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "omatweaks: run as your normal user, not root." >&2
+  exit 1
+fi
+
+feature_script() {
+  local name="$1"
+  case "$name" in
+    ''|*[!a-z0-9-]*|[!a-z0-9]*)
+      echo "omatweaks: invalid tweak name: $name" >&2
+      return 1
+      ;;
+  esac
+
+  local script="$repo_dir/$name/$name.sh"
+  if [ ! -f "$script" ]; then
+    echo "omatweaks: unknown tweak: $name" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$script"
+}
+
+list_features() {
+  local dir name summary found=0
+  for dir in "$repo_dir"/*/; do
+    name="$(basename -- "$dir")"
+    [ -f "$dir/$name.sh" ] || continue
+    summary="$(sed -n 's/^# Summary: //p' "$dir/$name.sh" | head -n 1)"
+    printf '  %-18s %s\n' "$name" "$summary"
+    found=1
+  done
+  [ "$found" -eq 1 ] || echo "  (no tweaks found)"
+}
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown"
+  else
+    echo "unknown (not a git checkout)"
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "omatweaks: not a git checkout; download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  printf 'omatweaks %s\n' "$(version)"
+}
+
+case "${1:-}" in
+  ""|-h|--help|help)
+    usage
+    ;;
+  list)
+    list_features
+    ;;
+  update)
+    update
+    ;;
+  version|--version)
+    version
+    ;;
+  *)
+    feature="$1"
+    action="${2:-}"
+
+    case "$action" in
+      enable|disable|status) ;;
+      *) usage ;;
+    esac
+
+    script="$(feature_script "$feature")" || exit 1
+    shift 2
+    exec "$script" "$action" "$@"
+    ;;
+esac

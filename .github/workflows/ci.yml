@@ -1,0 +1,21 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax
+        run: |
+          bash -n omatweaks
+          find . -path ./.git -prune -o -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+
+      - name: ShellCheck
+        run: |
+          shellcheck -S warning omatweaks
+          find . -path ./.git -prune -o -name '*.sh' -print0 | xargs -0 -r shellcheck -S warning
