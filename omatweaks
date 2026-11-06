@@ -12,6 +12,7 @@ done
 repo_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
 
 usage() {
+  local code="${1:-2}"
   cat >&2 <<'EOF'
 Usage: omatweaks <command>
 
@@ -25,7 +26,7 @@ Commands:
   update                Update this checkout
   version               Show the installed version
 EOF
-  exit 2
+  exit "$code"
 }
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -122,8 +123,11 @@ unlink_command() {
 }
 
 case "${1:-}" in
-  ""|-h|--help|help)
+  "")
     usage
+    ;;
+  -h|--help|help)
+    usage 0
     ;;
   list)
     list_features
