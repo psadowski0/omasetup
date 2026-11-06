@@ -35,13 +35,15 @@ install() {
 # Omatweaks: auto-hibernate.
 #
 # On battery: suspend first, then hibernate after HibernateDelaySec.
-# On AC: plain suspend, never hibernate.
+# On AC: also suspend-then-hibernate, but HibernateOnACPower=no keeps it
+# suspended while AC stays connected. If AC is unplugged while suspended,
+# the next check hibernates.
 [Login]
 HandleLidSwitch=suspend-then-hibernate
 
 # This must be explicit: logind ignores this setting when unset and falls
 # back to HandleLidSwitch, which would then hibernate on AC too.
-HandleLidSwitchExternalPower=suspend
+HandleLidSwitchExternalPower=suspend-then-hibernate
 EOF
 
   cat > "$sleep_config" <<'EOF'
@@ -52,13 +54,18 @@ EOF
 # stays suspended until the 5% low-battery alarm, which can take days.
 [Sleep]
 HibernateDelaySec=2h
+
+# Never hibernate while AC stays connected. If the charger is unplugged
+# while suspended, the next check hibernates.
+HibernateOnACPower=no
 EOF
 
   # logind supports reload, which is safer than restarting it.
   systemctl reload systemd-logind
 
-  if [ "$(prop HandleLidSwitch)" != "suspend-then-hibernate" ]; then
-    echo "Reload did not apply the setting; restarting systemd-logind." >&2
+  if [ "$(prop HandleLidSwitch)" != "suspend-then-hibernate" ] ||
+    [ "$(prop HandleLidSwitchExternalPower)" != "suspend-then-hibernate" ]; then
+    echo "Reload did not apply the settings; restarting systemd-logind." >&2
     systemctl restart systemd-logind
   fi
 
@@ -67,6 +74,7 @@ EOF
   printf 'HandleLidSwitch=%s\n' "$(prop HandleLidSwitch)"
   printf 'HandleLidSwitchExternalPower=%s\n' "$(prop HandleLidSwitchExternalPower)"
   printf 'HibernateDelaySec=%s\n' "$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
+  printf 'HibernateOnACPower=%s\n' "$(sed -n 's/^HibernateOnACPower=//p' "$sleep_config" | tail -n 1)"
 }
 
 uninstall() {
@@ -74,8 +82,9 @@ uninstall() {
 
   systemctl reload systemd-logind
 
-  if [ "$(prop HandleLidSwitch)" = "suspend-then-hibernate" ]; then
-    echo "Reload did not apply the change; restarting systemd-logind." >&2
+  if [ "$(prop HandleLidSwitch)" = "suspend-then-hibernate" ] ||
+    [ "$(prop HandleLidSwitchExternalPower)" = "suspend-then-hibernate" ]; then
+    echo "Reload did not apply the changes; restarting systemd-logind." >&2
     systemctl restart systemd-logind
   fi
 

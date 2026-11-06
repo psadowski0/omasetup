@@ -38,7 +38,7 @@ omatweaks update                    # get the latest version
 
 | Tweak | What it does |
 |---|---|
-| `auto-hibernate` | Hibernate automatically on battery; AC unchanged. |
+| `auto-hibernate` | Hibernate automatically on battery; never on AC. |
 
 More tweaks will be added here over time.
 
@@ -46,7 +46,7 @@ More tweaks will be added here over time.
 
 | You... | On battery | Plugged in |
 |---|---|---|
-| Close the lid | suspend, then hibernate after 2h or below 5% | suspend only |
+| Close the lid | suspend, then hibernate after 2h or below 5% | suspend; if unplugged while suspended, hibernate at the next 2h check |
 | Leave it idle | suspend after ~10 min, then hibernate 2h later | nothing |
 
 It waits if you are watching a video, on a call, or using "stay awake".
@@ -55,14 +55,18 @@ It waits if you are watching a video, on a call, or using "stay awake".
 
 ### How it works
 
-- **Lid:** systemd-logind is told to `suspend-then-hibernate` on battery. On AC
-  it keeps plain suspend, so it never hibernates there.
+- **Lid:** systemd-logind is told to `suspend-then-hibernate` on both battery
+  and AC. `HibernateOnACPower=no` keeps it suspended while AC stays connected,
+  so it never hibernates there. If you unplug the charger while it is
+  suspended, it hibernates at the next check (default: within 2h). On AC this
+  means a brief wake every 2h to re-check the power source.
 - **Idle:** a user timer checks once a minute whether Omarchy reports the
   session as idle. If it does, it suspends; systemd hibernates later. If
   systemd wakes early and skips hibernation, it retries after one minute.
-- **Timer:** a sleep drop-in sets `HibernateDelaySec=2h`. On a laptop with a
-  battery, systemd otherwise ignores the 2-hour default and waits for the 5%
-  low-battery alarm, which can take days.
+- **Timer:** a sleep drop-in sets `HibernateDelaySec=2h` and
+  `HibernateOnACPower=no`. On a laptop with a battery, systemd otherwise
+  ignores the 2-hour default and waits for the 5% low-battery alarm, which can
+  take days.
 
 ### Settings
 
@@ -70,7 +74,8 @@ It waits if you are watching a video, on a call, or using "stay awake".
   (default `10`). If you edit it, revert that edit before `update`.
 - **Hibernate delay:** edit `HibernateDelaySec=` in
   `/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf`
-  (default `2h`).
+  (default `2h`). This also sets how often an AC suspend checks the power
+  source.
 
 ### Files
 

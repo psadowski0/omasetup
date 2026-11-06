@@ -1,5 +1,5 @@
 #!/bin/bash
-# Summary: Hibernate automatically on battery; AC unchanged.
+# Summary: Hibernate automatically on battery; never on AC.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,7 +51,7 @@ logind_prop() {
 
 lid_enabled() {
   [ "$(logind_prop HandleLidSwitch)" = "suspend-then-hibernate" ] &&
-    [ "$(logind_prop HandleLidSwitchExternalPower)" = "suspend" ]
+    [ "$(logind_prop HandleLidSwitchExternalPower)" = "suspend-then-hibernate" ]
 }
 
 configs_installed() {
@@ -69,7 +69,8 @@ timer_running() {
 }
 
 is_enabled() {
-  lid_enabled && timer_running && [ -e "$sleep_config" ]
+  lid_enabled && timer_running && [ -e "$sleep_config" ] &&
+    grep -q '^HibernateOnACPower=no' "$sleep_config"
 }
 
 cleanup_old() {
@@ -170,7 +171,7 @@ print_status() {
   echo "Auto hibernate"
   echo
 
-  if [ "$lid" = "suspend-then-hibernate" ] && [ "$ext" = "suspend" ]; then
+  if [ "$lid" = "suspend-then-hibernate" ] && [ "$ext" = "suspend-then-hibernate" ]; then
     echo "  Lid on battery   suspend-then-hibernate (enabled)"
   elif [ "$lid" = "suspend" ] && [ -z "$ext" ]; then
     echo "  Lid on battery   suspend (not enabled)"
@@ -178,7 +179,9 @@ print_status() {
     echo "  Lid on battery   ${lid:-unknown} (custom)"
   fi
 
-  if [ "$ext" = "suspend" ]; then
+  if [ "$ext" = "suspend-then-hibernate" ]; then
+    echo "  Lid on AC        suspend-then-hibernate (never hibernates)"
+  elif [ "$ext" = "suspend" ]; then
     echo "  Lid on AC        suspend (safe, never hibernates)"
   else
     echo "  Lid on AC        ${ext:-unset}"
