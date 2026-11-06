@@ -151,8 +151,8 @@ enable() {
   idle_install
   echo
 
-  echo "Auto hibernate enabled."
-  echo "  Remove: omatweaks auto-hibernate disable"
+  echo "auto-hibernate is on."
+  echo "  Turn off: omatweaks auto-hibernate disable"
 }
 
 disable() {
@@ -169,7 +169,7 @@ disable() {
   cleanup_old
   echo
 
-  echo "Auto hibernate disabled."
+  echo "auto-hibernate is off."
 }
 
 print_status() {
@@ -186,44 +186,44 @@ print_status() {
     power="battery"
   fi
 
-  echo "Auto hibernate"
+  echo "auto-hibernate"
   echo
 
   if [ "$lid" = "suspend-then-hibernate" ] && [ "$ext" = "suspend-then-hibernate" ]; then
-    echo "  Lid on battery   suspend-then-hibernate (enabled)"
+    echo "  Lid on battery   suspend, then hibernate"
   elif [ "$lid" = "suspend" ] && [ -z "$ext" ]; then
-    echo "  Lid on battery   suspend (not enabled)"
+    echo "  Lid on battery   suspend only (tweak off)"
   else
-    echo "  Lid on battery   ${lid:-unknown} (custom)"
+    echo "  Lid on battery   custom (${lid:-unknown})"
   fi
 
   if [ "$ext" = "suspend-then-hibernate" ]; then
-    echo "  Lid on AC        suspend-then-hibernate (never hibernates)"
+    echo "  Lid on AC        suspend only (never hibernates)"
   elif [ "$ext" = "suspend" ]; then
-    echo "  Lid on AC        suspend (safe, never hibernates)"
+    echo "  Lid on AC        suspend only (safe)"
   else
     echo "  Lid on AC        ${ext:-unset}"
   fi
 
   if manual_enabled; then
-    echo "  Manual suspend   suspend-then-hibernate (enabled)"
+    echo "  Manual suspend   suspend, then hibernate"
   else
-    echo "  Manual suspend   plain suspend (not covered)"
+    echo "  Manual suspend   suspend only (tweak off)"
   fi
 
   if [ "$timer_enabled" = "enabled" ] && [ "$timer_active" = "active" ]; then
-    echo "  Idle timer       enabled, active"
+    echo "  Idle timer       on"
   elif [ "$timer_enabled" = "enabled" ]; then
-    echo "  Idle timer       enabled, ${timer_active:-inactive}"
+    echo "  Idle timer       on, not running"
   elif [ -f "$timer" ]; then
-    echo "  Idle timer       installed, ${timer_enabled:-disabled}"
+    echo "  Idle timer       installed, off"
   else
     echo "  Idle timer       not installed"
   fi
 
   echo "  Power now        $power"
   echo
-  echo "  Idle after       10 minutes (default)"
+  echo "  Idle after       10 minutes"
   if [ -e "$sleep_config" ]; then
     delay="$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
     echo "  Hibernate        ${delay:-?} after suspend"
@@ -233,9 +233,9 @@ print_status() {
   echo
 
   if is_enabled; then
-    echo "  State            enabled"
+    echo "  State            on"
   else
-    echo "  State            not fully enabled"
+    echo "  State            incomplete"
   fi
 }
 

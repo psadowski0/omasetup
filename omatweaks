@@ -16,15 +16,22 @@ usage() {
   cat >&2 <<'EOF'
 Usage: omatweaks <command>
 
+Small, reversible tweaks for Omarchy.
+
 Commands:
   list                  List available tweaks
-  <tweak> enable        Enable a tweak
-  <tweak> disable       Disable a tweak
-  <tweak> status        Show a tweak's state
-  link                  Link the omatweaks command into ~/.local/bin
-  unlink                Remove that link
+  <tweak> enable        Turn a tweak on
+  <tweak> disable       Turn a tweak off and remove its files
+  <tweak> status        Show what a tweak is doing
+  link                  Put the omatweaks command on your PATH
+  unlink                Remove that command
   update                Update this checkout
   version               Show the installed version
+
+Examples:
+  omatweaks list
+  omatweaks auto-hibernate enable
+  omatweaks auto-hibernate status
 EOF
   exit "$code"
 }
@@ -54,6 +61,7 @@ feature_script() {
 
 list_features() {
   local dir name script summary state found=0
+  echo "Tweaks"
   for dir in "$repo_dir"/tweaks/*/; do
     [ -d "$dir" ] || continue
     name="$(basename -- "$dir")"

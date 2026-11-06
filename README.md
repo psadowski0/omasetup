@@ -1,162 +1,113 @@
+<p align="center">
+  <img src="docs/tested-badge.svg" alt="Human-tested on real hardware" height="34">
+</p>
+
 # Omatweaks
 
-A small command-line tool for [Omarchy](https://omarchy.org/). Each tweak fixes
-one real annoyance, and you can remove it completely.
+Small, reversible tweaks for [Omarchy](https://omarchy.org/).
+One command turns a tweak on. One command removes it.
 
-**Current tweak: `auto-hibernate`.** Your laptop is at 30%, you close the lid,
-throw it in a bag, and forget about it. This makes it suspend, then hibernate
-before the battery dies. Plugged in, nothing changes.
+**auto-hibernate** — close the lid and walk away. The laptop suspends, then
+hibernates before the battery dies. Plugged in, it simply stays suspended.
+
+<img src="docs/auto-hibernate.svg" alt="Lid, idle, or manual suspend leads to suspend; on battery it hibernates after two hours; on AC it stays suspended" width="100%">
+
+**Suspend** resumes instantly but slowly drains the battery. **Hibernate**
+writes memory to disk, uses almost no power, and resumes in a few seconds.
 
 Unofficial. Not affiliated with Omarchy.
 
 ## Install
 
-Copy-paste this once:
+One copy-paste. Omarchy already has `~/.local/bin` on `PATH`.
 
 ```bash
-git clone --depth=1 https://github.com/psadowski0/omatweaks.git \
-  ~/.local/share/omatweaks
-~/.local/share/omatweaks/omatweaks link
+git clone --depth=1 https://github.com/psadowski0/omatweaks.git ~/.local/share/omatweaks && ~/.local/share/omatweaks/omatweaks link
 ```
-
-`link` puts the `omatweaks` command in `~/.local/bin`, which Omarchy already
-has on `PATH`.
 
 ## Use
 
 ```bash
-omatweaks list                      # what's available and what's on
-omatweaks auto-hibernate enable     # turn a tweak on (asks for sudo once)
-omatweaks auto-hibernate status     # what's happening right now
+omatweaks list                      # what is available
+omatweaks auto-hibernate enable     # turn it on (asks for sudo once)
+omatweaks auto-hibernate status     # what is happening now
 omatweaks auto-hibernate disable    # turn it off, remove everything
-omatweaks update                    # get the latest version
 ```
 
-`enable` and `disable` are safe to run more than once.
+`enable` and `disable` are safe to repeat. Requires Omarchy, `jq`, `git`, and
+working hibernation (`omarchy-hibernation-available`).
 
-## Tweaks
+## What it does
 
-| Tweak | What it does |
-|---|---|
-| `auto-hibernate` | Hibernate automatically on battery; never on AC. |
-
-More tweaks will be added here over time.
-
-## auto-hibernate
-
-| You... | On battery | Plugged in |
+| You… | On battery | Plugged in |
 |---|---|---|
-| Close the lid | suspend, then hibernate after 2h or below 5% | suspend; if unplugged while suspended, hibernate at the next 2h check |
-| Leave it idle | suspend after ~10 min, then hibernate 2h later | nothing |
-| Suspend manually (menu, key, `systemctl suspend`) | suspend, then hibernate after 2h or below 5% | suspend; if unplugged while suspended, hibernate at the next 2h check |
+| Close the lid | suspend → hibernate after 2 h | suspend; hibernate later if you unplug |
+| Leave it idle | suspend after 10 min → hibernate after 2 h | nothing |
+| Suspend from the menu, key, or `systemctl suspend` | suspend → hibernate after 2 h | suspend; hibernate later if you unplug |
 
-It waits if you are watching a video, on a call, or using "stay awake".
+It waits while you are watching a video, on a call, or using **stay awake**.
 
-## Details
+## Tested on real hardware
 
-### How it works
+**Human-supervised, on real hardware, in real-world conditions.** A person
+closed the real lid, plugged in the real charger, and left the laptop idle. Not
+a VM, not a simulation.
 
-- **Lid:** systemd-logind is told to `suspend-then-hibernate` on both battery
-  and AC. `HibernateOnACPower=no` keeps it suspended while AC stays connected,
-  so it never hibernates there. If you unplug the charger while it is
-  suspended, it hibernates at the next check (default: within 2h). On AC this
-  means a brief wake every 2h to re-check the power source.
-- **Idle:** a user timer checks once a minute whether Omarchy reports the
-  session as idle. If it does, it suspends; systemd hibernates later. If a
-  suspend was supposed to hibernate but woke up without doing so, it hibernates
-  directly after one minute of idle instead of waiting the full idle period.
-- **Any suspend:** `systemd-suspend.service` is overridden to
-  `suspend-then-hibernate`, so the power menu, suspend key,
-  `systemctl suspend`, and any other program all get the same battery safety
-  timer. Explicit `systemctl hibernate` stays immediate, and hybrid sleep is
-  unchanged.
-- **Timer:** a sleep drop-in sets `HibernateDelaySec=2h` and
-  `HibernateOnACPower=no`. On a laptop with a battery, systemd otherwise
-  ignores the 2-hour default and waits for the 5% low-battery alarm, which can
-  take days.
+| Scenario | Result |
+|---|---|
+| Lid closed on battery | suspend → hibernate → resume ✅ |
+| Lid closed on AC | stays suspended ✅ |
+| Charger unplugged while suspended | hibernates at the next check ✅ |
+| Idle on battery | automatic suspend ✅ |
+| Idle on AC | no sleep ✅ |
+| Stay-awake / video / call | no sleep ✅ |
+| Manual suspend | suspend → hibernate → resume ✅ |
+| Early-wake race (systemd #38193) | retried, hibernated ✅ |
+| Disable → enable | no leftovers ✅ |
 
-### Settings
+**Machine:** Framework Laptop 13 (AMD Ryzen 7040 series, Ryzen 5 7640U, 14.9 GiB
+RAM) · BIOS 03.20 · Omarchy 4.5.0 on Arch · kernel 7.2.15 · systemd 262 ·
+`s2idle` · encrypted 14.9 GiB swapfile.
 
-- **Idle time:** `IDLE_MINUTES` in `tweaks/auto-hibernate/idle-check.sh`
-  (default `10`). If you edit it, revert that edit before `update`.
-- **Hibernate delay:** edit `HibernateDelaySec=` in
-  `/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf`
-  (default `2h`). This also sets how often an AC suspend checks the power
-  source.
+**Tested:** 6 November 2026.
 
-### Files
+Not tested on purpose: below 5% battery (unsafe to force) and hybrid sleep
+(this tweak does not touch it). The idle path's hibernate step is the same
+systemd path verified by the lid and manual tests.
 
-`enable` adds these, `disable` removes them:
+## Good to know
 
-```
-~/.config/systemd/user/omatweaks-auto-hibernate.service
-~/.config/systemd/user/omatweaks-auto-hibernate.timer
-~/.config/systemd/user/timers.target.wants/omatweaks-auto-hibernate.timer
-/run/user/$UID/omatweaks-auto-hibernate.since
-/run/user/$UID/omatweaks-auto-hibernate.handled
-/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
-/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
-/etc/systemd/system/systemd-suspend.service.d/60-omatweaks-auto-hibernate.conf
-```
-
-Older versions used different names and did not install the sleep or
-manual-suspend drop-in. `enable` and `disable` remove the old files too, so
-upgrading only needs one more run of `omatweaks auto-hibernate enable`.
-
-### Requirements
-
-Omarchy, systemd, `jq`, `git`, and working hibernation.
-
-### Troubleshooting
-
-```bash
-omatweaks auto-hibernate status
-systemctl --user status omatweaks-auto-hibernate.timer
-journalctl --user -u omatweaks-auto-hibernate.service -n 50
-systemd-analyze cat-config systemd/sleep.conf | grep HibernateDelaySec
-journalctl -b | grep -E 'PM: hibernation|Performing sleep operation'
-```
-
-If it suspends but never hibernates, check the output above. If
-`HibernateDelaySec` is set but the journal shows
-`System returned from sleep operation 'suspend-then-hibernate'` without
-`Performing sleep operation 'hibernate'`, you hit systemd issue #38193: the
-wake alarm can fire a fraction of a second before systemd's timer, and systemd
-then treats it as a manual wake. omatweaks notices the missing hibernation and
-hibernates after one minute of idle. A permanent fix is in systemd PR #44650.
+- It never hibernates while the charger stays connected.
+- On battery it waits **2 hours**, so a short break stays in fast suspend.
+- Changing your mind is one command: `omatweaks auto-hibernate disable`.
 
 ### When not to insist on hibernation
 
-Hibernation is the right answer when the laptop will sit unused on battery. It
-is not always worth it:
+- **On AC** — suspend is enough.
+- **A short break** — the 2-hour delay never gets there.
+- **Video, call, stay awake** — it waits on purpose.
+- **Unreliable resume** — fix hibernation first; unreliable hibernation is worse
+  than suspend.
+- **A few percent of battery** — plug in if you can; the image may not finish
+  writing.
 
-- **On AC**, suspend is enough. This tweak never hibernates while AC stays
-  connected.
-- **For a short break**, suspend already saves power. The 2-hour delay means a
-  five-minute pause never reaches hibernation.
-- **During a video, call, or "stay awake"**, the tweak waits. Forcing
-  hibernation there would be wrong.
-- **If resume from hibernation is unreliable** on your machine (black screen,
-  missing devices), fix that first. Unreliable hibernation is worse than
-  suspend.
-- **If hibernation starts failing** (for example, the swap file is too small
-  for the RAM in use), it cannot protect the battery. Check with
-  `omarchy-hibernation-available` and `journalctl -b | grep -i hibernat`.
-- **At a few percent of battery**, even a successful hibernation may not finish
-  writing the image. Plug in before then if you can.
-
-## Remove completely
+## Update
 
 ```bash
-omatweaks auto-hibernate disable
-omatweaks unlink
-rm -rf ~/.local/share/omatweaks
+omatweaks update
 ```
 
-## For maintainers
+## Remove
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+One copy-paste:
 
-## License
+```bash
+omatweaks auto-hibernate disable && omatweaks unlink && rm -rf ~/.local/share/omatweaks
+```
 
-MIT. See [LICENSE](LICENSE).
+## More
+
+- [How it works](docs/how-it-works.md) — the systemd pieces, files, and settings.
+- [Full test log](docs/testing.md) — every scenario and the evidence behind it.
+- [Contributing](CONTRIBUTING.md)
+- MIT license — see [LICENSE](LICENSE).

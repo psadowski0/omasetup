@@ -29,7 +29,8 @@ Rules:
 - Never run the whole script as root. Escalate only the specific command that
   needs it, and keep that command in a small helper.
 - Do not depend on another tweak.
-- Add a row to the `Tweaks` table in `README.md` and a short section below it.
+- Add a short user-facing section to `README.md`. Put deeper details in
+  `docs/` and test evidence in `docs/testing.md`.
 
 Before committing:
 
