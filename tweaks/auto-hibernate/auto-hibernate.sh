@@ -4,7 +4,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 idle_check="$script_dir/idle-check.sh"
-lid_helper="$script_dir/lid.sh"
+system_helper="$script_dir/system.sh"
 
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 service="$unit_dir/omatweaks-auto-hibernate.service"
@@ -12,6 +12,7 @@ timer="$unit_dir/omatweaks-auto-hibernate.timer"
 state_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.since"
 
 lid_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
+sleep_config=/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
 old_lid_configs=(
   /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
   /etc/systemd/logind.conf.d/30-lid-battery.conf
@@ -52,8 +53,9 @@ lid_enabled() {
     [ "$(logind_prop HandleLidSwitchExternalPower)" = "suspend" ]
 }
 
-lid_installed() {
+configs_installed() {
   local config
+  [ -e "$sleep_config" ] && return 0
   for config in "$lid_config" "${old_lid_configs[@]}"; do
     [ -e "$config" ] && return 0
   done
@@ -66,7 +68,7 @@ timer_running() {
 }
 
 is_enabled() {
-  lid_enabled && timer_running
+  lid_enabled && timer_running && [ -e "$sleep_config" ]
 }
 
 cleanup_old() {
@@ -120,8 +122,8 @@ idle_remove() {
 }
 
 enable() {
-  echo "Applying lid policy (sudo)..."
-  sudo "$lid_helper" install
+  echo "Applying lid and sleep policy (sudo)..."
+  sudo "$system_helper" install
   echo
 
   echo "Installing idle timer..."
@@ -134,12 +136,12 @@ enable() {
 }
 
 disable() {
-  if lid_installed; then
-    echo "Removing lid policy (sudo)..."
-    sudo "$lid_helper" uninstall
+  if configs_installed; then
+    echo "Removing lid and sleep policy (sudo)..."
+    sudo "$system_helper" uninstall
     echo
   else
-    echo "Lid policy is not installed; skipping sudo."
+    echo "Lid and sleep policy are not installed; skipping sudo."
   fi
 
   echo "Removing idle timer..."
@@ -151,7 +153,7 @@ disable() {
 }
 
 print_status() {
-  local lid ext timer_enabled timer_active power
+  local lid ext timer_enabled timer_active power delay
 
   lid="$(logind_prop HandleLidSwitch)"
   ext="$(logind_prop HandleLidSwitchExternalPower)"
@@ -194,7 +196,12 @@ print_status() {
   echo "  Power now        $power"
   echo
   echo "  Idle after       10 minutes (default)"
-  echo "  Hibernate        2 hours after suspend (systemd default)"
+  if [ -e "$sleep_config" ]; then
+    delay="$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
+    echo "  Hibernate        ${delay:-?} after suspend"
+  else
+    echo "  Hibernate        not configured"
+  fi
   echo
 
   if is_enabled; then

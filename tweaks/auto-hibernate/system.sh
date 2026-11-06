@@ -3,8 +3,9 @@
 # auto-hibernate.sh; not meant to be run directly.
 set -euo pipefail
 
-config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
-old_configs=(
+logind_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
+sleep_config=/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
+old_logind_configs=(
   /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
   /etc/systemd/logind.conf.d/30-lid-battery.conf
 )
@@ -27,21 +28,30 @@ prop() {
 }
 
 install() {
-  mkdir -p -- "$(dirname -- "$config")"
-  rm -f -- "${old_configs[@]}"
+  mkdir -p -- "$(dirname -- "$logind_config")" "$(dirname -- "$sleep_config")"
+  rm -f -- "${old_logind_configs[@]}"
 
-  cat > "$config" <<'EOF'
+  cat > "$logind_config" <<'EOF'
 # Omatweaks: auto-hibernate.
 #
-# On battery: suspend first, then hibernate after HibernateDelaySec
-# (2h by default) or when the battery drops below 5%, whichever comes first.
+# On battery: suspend first, then hibernate after HibernateDelaySec.
+# On AC: plain suspend, never hibernate.
 [Login]
 HandleLidSwitch=suspend-then-hibernate
 
-# Keep AC behavior unchanged: plain suspend, never hibernate.
 # This must be explicit: logind ignores this setting when unset and falls
 # back to HandleLidSwitch, which would then hibernate on AC too.
 HandleLidSwitchExternalPower=suspend
+EOF
+
+  cat > "$sleep_config" <<'EOF'
+# Omatweaks: auto-hibernate.
+#
+# systemd only applies a timeout to suspend-then-hibernate on a laptop with a
+# battery when HibernateDelaySec is set explicitly. Without it, the laptop
+# stays suspended until the 5% low-battery alarm, which can take days.
+[Sleep]
+HibernateDelaySec=2h
 EOF
 
   # logind supports reload, which is safer than restarting it.
@@ -52,13 +62,15 @@ EOF
     systemctl restart systemd-logind
   fi
 
-  echo "Installed $config"
+  echo "Installed $logind_config"
+  echo "Installed $sleep_config"
   printf 'HandleLidSwitch=%s\n' "$(prop HandleLidSwitch)"
   printf 'HandleLidSwitchExternalPower=%s\n' "$(prop HandleLidSwitchExternalPower)"
+  printf 'HibernateDelaySec=%s\n' "$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
 }
 
 uninstall() {
-  rm -f -- "$config" "${old_configs[@]}"
+  rm -f -- "$logind_config" "$sleep_config" "${old_logind_configs[@]}"
 
   systemctl reload systemd-logind
 
@@ -67,7 +79,8 @@ uninstall() {
     systemctl restart systemd-logind
   fi
 
-  echo "Removed $config"
+  echo "Removed $logind_config"
+  echo "Removed $sleep_config"
   printf 'HandleLidSwitch=%s\n' "$(prop HandleLidSwitch)"
   printf 'HandleLidSwitchExternalPower=%s\n' "$(prop HandleLidSwitchExternalPower)"
 }

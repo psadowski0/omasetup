@@ -59,13 +59,17 @@ It waits if you are watching a video, on a call, or using "stay awake".
   it keeps plain suspend, so it never hibernates there.
 - **Idle:** a user timer checks once a minute whether Omarchy reports the
   session as idle. If it does, it suspends; systemd hibernates later.
+- **Timer:** a sleep drop-in sets `HibernateDelaySec=2h`. On a laptop with a
+  battery, systemd otherwise ignores the 2-hour default and waits for the 5%
+  low-battery alarm, which can take days.
 
 ### Settings
 
 - **Idle time:** `IDLE_MINUTES` in `tweaks/auto-hibernate/idle-check.sh`
   (default `10`). If you edit it, revert that edit before `update`.
-- **Hibernate delay:** add `HibernateDelaySec=1h` to
-  `/etc/systemd/sleep.conf.d/` (default `2h`).
+- **Hibernate delay:** edit `HibernateDelaySec=` in
+  `/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf`
+  (default `2h`).
 
 ### Files
 
@@ -77,10 +81,12 @@ It waits if you are watching a video, on a call, or using "stay awake".
 ~/.config/systemd/user/timers.target.wants/omatweaks-auto-hibernate.timer
 /run/user/$UID/omatweaks-auto-hibernate.since
 /etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
+/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
 ```
 
-Older versions used different names. `enable` and `disable` remove those old
-files too, so upgrading needs no manual cleanup.
+Older versions used different names and did not install the sleep drop-in.
+`enable` and `disable` remove the old files too, so upgrading only needs one
+more run of `omatweaks auto-hibernate enable`.
 
 ### Requirements
 
@@ -92,7 +98,12 @@ Omarchy, systemd, `jq`, `git`, and working hibernation.
 omatweaks auto-hibernate status
 systemctl --user status omatweaks-auto-hibernate.timer
 journalctl --user -u omatweaks-auto-hibernate.service -n 50
+systemd-analyze cat-config systemd/sleep.conf | grep HibernateDelaySec
+journalctl -b | grep -E 'PM: hibernation|Performing sleep operation'
 ```
+
+If it suspends but never hibernates, make sure `HibernateDelaySec` is set and
+the journal shows `Performing sleep operation 'hibernate'`.
 
 ## Remove completely
 
