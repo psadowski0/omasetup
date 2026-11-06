@@ -68,5 +68,15 @@ PR #44650.
 
 ## Packaging smoke test
 
-The final migration test for the new command and systemd names is recorded here
-after the Omasetup v0.1.0 build.
+The packaged module was tested again on 7 November 2026. The migration removed
+the old user units and the old files under `/etc`, then enabled the new
+`auto-hibernate` names.
+
+| Check | Result |
+|---|---|
+| Old files | No old units or configs remain. |
+| New files | The user service, the timer, and the three drop-ins are installed. |
+| Lid close on battery | Suspend 00:31:02 → woke after 2m1s → hibernate 00:33:02 → resume 00:35:05 |
+| Test delay | `HibernateDelaySec=2min` for the test; restored to `2h` afterwards |
+| Disable → enable | The timer and all three drop-ins were removed, then restored; no leftovers remained. |
+| `status --quiet` | exit 0 |

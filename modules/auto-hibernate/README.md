@@ -76,7 +76,8 @@ charger, and left the laptop idle. It was not a virtual machine or a simulation.
 RAM) · BIOS 03.20 · Omarchy 4.5.0 on Arch · kernel 7.2.15 · systemd 262 ·
 `s2idle` · encrypted 14.9 GiB swapfile.
 
-**Tested:** 6 November 2026.
+**Tested:** 6 November 2026 (original hardware tests) and 7 November 2026
+(packaged module).
 
 The original hardware tests ran before this module was packaged for Omasetup.
 The auto-hibernate logic is unchanged. The module was then tested again with the

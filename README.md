@@ -6,15 +6,13 @@ Omasetup is an app for building, modifying, and restoring an Omarchy setup. The
 app itself is not built yet. Omasetup is unofficial and is not affiliated with
 Omarchy.
 
-## How will it help you?
+## How does it help you?
 
 Omasetup will let you:
 
 - Build a new Omarchy setup from a known-good configuration.
 - Modify an existing setup without hunting through config files.
 - Restore your setup after a reinstall or a hardware change.
-
-The app itself is not built yet.
 
 ## What works today?
 
