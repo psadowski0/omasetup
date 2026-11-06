@@ -23,6 +23,11 @@ usage() {
   exit 2
 }
 
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Run as your normal user, not root." >&2
+  exit 1
+fi
+
 logind_prop() {
   busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
     org.freedesktop.login1.Manager "$1" 2>/dev/null | cut -d'"' -f2 || true
