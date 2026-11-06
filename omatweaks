@@ -2,7 +2,13 @@
 # Omatweaks: small, reversible tweaks for Omarchy.
 set -euo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+repo_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
 
 usage() {
   cat >&2 <<'EOF'
@@ -13,6 +19,8 @@ Commands:
   <tweak> enable        Enable a tweak
   <tweak> disable       Disable a tweak
   <tweak> status        Show a tweak's state
+  link                  Link the omatweaks command into ~/.local/bin
+  unlink                Remove that link
   update                Update this checkout
   version               Show the installed version
 EOF
@@ -72,12 +80,58 @@ update() {
   printf 'omatweaks %s\n' "$(version)"
 }
 
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/omatweaks"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "omatweaks: $link already exists and is not a symlink; refusing to overwrite." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$repo_dir/omatweaks" ]; then
+    echo "omatweaks: $link points elsewhere; refusing to overwrite." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$repo_dir/omatweaks" "$link"
+  echo "Linked $link -> $repo_dir/omatweaks"
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run: omatweaks list" ;;
+    *) echo "Warning: $bin_dir is not in PATH; add it or use $repo_dir/omatweaks." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/omatweaks"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$repo_dir/omatweaks" ]; then
+    rm -f -- "$link"
+    echo "Removed $link"
+  elif [ -e "$link" ]; then
+    echo "omatweaks: $link does not point at this checkout; not removing." >&2
+    exit 1
+  else
+    echo "No link at $link."
+  fi
+}
+
 case "${1:-}" in
   ""|-h|--help|help)
     usage
     ;;
   list)
     list_features
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
     ;;
   update)
     update

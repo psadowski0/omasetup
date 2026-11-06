@@ -18,8 +18,7 @@ threshold comes from UPower's `PercentageCritical`.
 ## Enable
 
 ```bash
-d="${XDG_DATA_HOME:-$HOME/.local/share}/omatweaks"
-"$d/omatweaks" battery-hibernate enable
+omatweaks battery-hibernate enable
 ```
 
 The lid part asks for sudo once. The idle part runs as your user.
@@ -27,7 +26,7 @@ The lid part asks for sudo once. The idle part runs as your user.
 ## Disable
 
 ```bash
-"$d/omatweaks" battery-hibernate disable
+omatweaks battery-hibernate disable
 ```
 
 This removes the logind drop-in, the user timer, its units, and the runtime
@@ -36,7 +35,7 @@ state file. It is safe to run when nothing is installed.
 ## Status
 
 ```bash
-"$d/omatweaks" battery-hibernate status
+omatweaks battery-hibernate status
 ```
 
 `status --quiet` prints nothing and exits 0 only when the full feature is

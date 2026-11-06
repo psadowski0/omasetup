@@ -10,9 +10,11 @@ Unofficial. Not affiliated with Omarchy.
 ```bash
 d="${XDG_DATA_HOME:-$HOME/.local/share}/omatweaks"
 git clone --depth=1 https://github.com/psadowski0/omatweaks.git "$d"
+"$d/omatweaks" link
 ```
 
-Everything after this works offline. Only `update` needs the network.
+`link` adds `omatweaks` to `~/.local/bin` (Omarchy already has it in
+`PATH`). Everything after this works offline. Only `update` needs the network.
 
 ## Features
 
@@ -25,16 +27,17 @@ More tweaks will be added here as separate folders.
 ## Use
 
 ```bash
-d="${XDG_DATA_HOME:-$HOME/.local/share}/omatweaks"
-
-"$d/omatweaks" list
-"$d/omatweaks" battery-hibernate enable
-"$d/omatweaks" battery-hibernate status
-"$d/omatweaks" battery-hibernate disable
+omatweaks list
+omatweaks battery-hibernate enable
+omatweaks battery-hibernate status
+omatweaks battery-hibernate disable
 ```
 
 `enable` and `disable` are idempotent. Run them as your normal user, never
 with `sudo`; the tweak asks for sudo only for the part that needs root.
+
+If you skipped `link`, use `"$d/omatweaks"` instead, or add the checkout to
+your `PATH`.
 
 ## Requirements
 
@@ -47,7 +50,7 @@ with `sudo`; the tweak asks for sudo only for the part that needs root.
 ## Update
 
 ```bash
-"$d/omatweaks" update
+omatweaks update
 ```
 
 ## Remove everything
@@ -55,17 +58,19 @@ with `sudo`; the tweak asks for sudo only for the part that needs root.
 Disable each tweak first, then delete the checkout:
 
 ```bash
-"$d/omatweaks" battery-hibernate disable
+d="${XDG_DATA_HOME:-$HOME/.local/share}/omatweaks"
+omatweaks battery-hibernate disable
+omatweaks unlink
 rm -rf "$d"
 ```
 
-`disable` removes exactly what `enable` added. The checkout itself is only
-removed by the `rm -rf`.
+`disable` removes exactly what `enable` added. `unlink` removes only the
+`omatweaks` command link. The checkout itself is removed by the `rm -rf`.
 
 ## Troubleshooting
 
 ```bash
-"$d/omatweaks" battery-hibernate status
+omatweaks battery-hibernate status
 systemctl --user status omatweaks-battery-hibernate.timer
 journalctl --user -u omatweaks-battery-hibernate.service -n 50
 ```
