@@ -58,7 +58,8 @@ It waits if you are watching a video, on a call, or using "stay awake".
 - **Lid:** systemd-logind is told to `suspend-then-hibernate` on battery. On AC
   it keeps plain suspend, so it never hibernates there.
 - **Idle:** a user timer checks once a minute whether Omarchy reports the
-  session as idle. If it does, it suspends; systemd hibernates later.
+  session as idle. If it does, it suspends; systemd hibernates later. If
+  systemd wakes early and skips hibernation, it retries after one minute.
 - **Timer:** a sleep drop-in sets `HibernateDelaySec=2h`. On a laptop with a
   battery, systemd otherwise ignores the 2-hour default and waits for the 5%
   low-battery alarm, which can take days.
@@ -80,6 +81,7 @@ It waits if you are watching a video, on a call, or using "stay awake".
 ~/.config/systemd/user/omatweaks-auto-hibernate.timer
 ~/.config/systemd/user/timers.target.wants/omatweaks-auto-hibernate.timer
 /run/user/$UID/omatweaks-auto-hibernate.since
+/run/user/$UID/omatweaks-auto-hibernate.attempt
 /etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
 /etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
 ```
@@ -102,8 +104,14 @@ systemd-analyze cat-config systemd/sleep.conf | grep HibernateDelaySec
 journalctl -b | grep -E 'PM: hibernation|Performing sleep operation'
 ```
 
-If it suspends but never hibernates, make sure `HibernateDelaySec` is set and
-the journal shows `Performing sleep operation 'hibernate'`.
+If it suspends but never hibernates, check the output above. If
+`HibernateDelaySec` is set but the journal shows
+`System returned from sleep operation 'suspend-then-hibernate'` without
+`Performing sleep operation 'hibernate'`, you hit systemd issue #38193: the
+wake alarm can fire a fraction of a second before systemd's timer, and systemd
+then treats it as a manual wake. omatweaks retries automatically — logind
+re-fires while the lid is closed, and the idle path retries after one minute.
+A permanent fix is in systemd PR #44650.
 
 ## Remove completely
 

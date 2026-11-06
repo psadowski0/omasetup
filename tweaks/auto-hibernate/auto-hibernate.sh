@@ -10,6 +10,7 @@ unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 service="$unit_dir/omatweaks-auto-hibernate.service"
 timer="$unit_dir/omatweaks-auto-hibernate.timer"
 state_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.since"
+attempt_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.attempt"
 
 lid_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
 sleep_config=/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
@@ -117,7 +118,7 @@ EOF
 idle_remove() {
   systemctl --user disable --now omatweaks-auto-hibernate.timer 2>/dev/null || true
   systemctl --user reset-failed omatweaks-auto-hibernate.service 2>/dev/null || true
-  rm -f -- "$service" "$timer" "$state_file"
+  rm -f -- "$service" "$timer" "$state_file" "$attempt_file"
   systemctl --user daemon-reload
 }
 
