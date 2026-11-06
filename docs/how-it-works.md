@@ -1,14 +1,14 @@
 # How auto-hibernate works
 
 The tweak plugs into the sleep system already provided by systemd and Omarchy.
-`enable` adds a few drop-in files; `disable` removes them.
+`enable` adds a few drop-in files, and `disable` removes them.
 
 ## The short version
 
 - **Lid and manual suspend:** systemd-logind and `systemd-suspend.service` are
   told to `suspend-then-hibernate`. `HibernateDelaySec=2h` sets the timer.
   `HibernateOnACPower=no` keeps it suspended while AC stays connected. If you
-  unplug while suspended, the next check (within 2 h) hibernates.
+  unplug while suspended, the laptop hibernates at the next check (within 2 h).
 - **Idle:** a user timer runs once a minute. When Omarchy reports the session as
   idle, it suspends; systemd hibernates later. It respects video/call inhibitors
   and the stay-awake toggle.
@@ -29,7 +29,7 @@ The tweak plugs into the sleep system already provided by systemd and Omarchy.
 
 ## Files
 
-`enable` adds these, `disable` removes them:
+`enable` adds these files, and `disable` removes them:
 
 ```
 ~/.config/systemd/user/omatweaks-auto-hibernate.service
@@ -43,12 +43,13 @@ The tweak plugs into the sleep system already provided by systemd and Omarchy.
 ```
 
 Older versions used different names. `enable` and `disable` also remove the old
-files, so upgrading only needs one more `omatweaks auto-hibernate enable`.
+files, so upgrading only requires running `omatweaks auto-hibernate enable` once
+more.
 
 ## Requirements
 
-Omarchy, systemd, `jq`, `git`, and working hibernation. Check with
-`omarchy-hibernation-available`.
+The tweak needs Omarchy, systemd, `jq`, `git`, and working hibernation. Check
+with `omarchy-hibernation-available`.
 
 ## Troubleshooting
 

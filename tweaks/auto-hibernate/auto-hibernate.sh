@@ -1,5 +1,5 @@
 #!/bin/bash
-# Summary: Hibernate automatically on battery; never on AC.
+# Summary: Hibernates automatically on battery and never on AC.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +44,7 @@ usage() {
 }
 
 if [ "$(id -u)" -eq 0 ]; then
-  echo "Run as your normal user, not root." >&2
+  echo "Run as your normal user, not as root." >&2
   exit 1
 fi
 
@@ -103,7 +103,7 @@ idle_install() {
 
   cat > "$service" <<EOF
 [Unit]
-Description=Omatweaks: hibernate automatically on battery
+Description=Omatweaks: Hibernates automatically on battery
 
 [Service]
 Type=oneshot
@@ -112,7 +112,7 @@ EOF
 
   cat > "$timer" <<'EOF'
 [Unit]
-Description=Omatweaks: check for auto-hibernate on battery
+Description=Omatweaks: Checks for auto-hibernate on battery
 
 [Timer]
 OnBootSec=2min
@@ -138,33 +138,33 @@ enable() {
   if [ -x /usr/share/omarchy/bin/omarchy-hibernation-available ] &&
     ! /usr/share/omarchy/bin/omarchy-hibernation-available; then
     echo "Hibernation is not available on this machine." >&2
-    echo "Enable hibernation first (omarchy-hibernation-setup), then retry." >&2
+    echo "Enable hibernation first by running 'omarchy-hibernation-setup', then try again." >&2
     exit 1
   fi
 
-  echo "Applying lid and sleep policy (sudo)..."
+  echo "omatweaks is applying the lid and sleep policy (sudo)..."
   sudo "$system_helper" install
   echo
 
-  echo "Installing idle timer..."
+  echo "omatweaks is installing the idle timer..."
   cleanup_old
   idle_install
   echo
 
   echo "auto-hibernate is on."
-  echo "  Turn off: omatweaks auto-hibernate disable"
+  echo "  To turn it off, run 'omatweaks auto-hibernate disable'."
 }
 
 disable() {
   if configs_installed; then
-    echo "Removing lid and sleep policy (sudo)..."
+    echo "omatweaks is removing the lid and sleep policy (sudo)..."
     sudo "$system_helper" uninstall
     echo
   else
-    echo "Lid and sleep policy are not installed; skipping sudo."
+    echo "The lid and sleep policy are not installed, so sudo is not needed."
   fi
 
-  echo "Removing idle timer..."
+  echo "omatweaks is removing the idle timer..."
   idle_remove
   cleanup_old
   echo
@@ -190,52 +190,52 @@ print_status() {
   echo
 
   if [ "$lid" = "suspend-then-hibernate" ] && [ "$ext" = "suspend-then-hibernate" ]; then
-    echo "  Lid on battery   suspend, then hibernate"
+    echo "  Lid on battery   It suspends, then hibernates."
   elif [ "$lid" = "suspend" ] && [ -z "$ext" ]; then
-    echo "  Lid on battery   suspend only (tweak off)"
+    echo "  Lid on battery   It suspends only, because the tweak is off."
   else
-    echo "  Lid on battery   custom (${lid:-unknown})"
+    echo "  Lid on battery   The setting is ${lid:-unknown}."
   fi
 
   if [ "$ext" = "suspend-then-hibernate" ]; then
-    echo "  Lid on AC        suspend only (never hibernates)"
+    echo "  Lid on AC        It suspends and never hibernates while the charger is connected."
   elif [ "$ext" = "suspend" ]; then
-    echo "  Lid on AC        suspend only (safe)"
+    echo "  Lid on AC        It suspends only, which is safe."
   else
-    echo "  Lid on AC        ${ext:-unset}"
+    echo "  Lid on AC        The setting is ${ext:-unset}."
   fi
 
   if manual_enabled; then
-    echo "  Manual suspend   suspend, then hibernate"
+    echo "  Manual suspend   It suspends, then hibernates."
   else
-    echo "  Manual suspend   suspend only (tweak off)"
+    echo "  Manual suspend   It suspends only, because the tweak is off."
   fi
 
   if [ "$timer_enabled" = "enabled" ] && [ "$timer_active" = "active" ]; then
-    echo "  Idle timer       on"
+    echo "  Idle timer       The timer is on."
   elif [ "$timer_enabled" = "enabled" ]; then
-    echo "  Idle timer       on, not running"
+    echo "  Idle timer       The timer is on, but it is not running."
   elif [ -f "$timer" ]; then
-    echo "  Idle timer       installed, off"
+    echo "  Idle timer       The timer is installed, but it is off."
   else
-    echo "  Idle timer       not installed"
+    echo "  Idle timer       The timer is not installed."
   fi
 
-  echo "  Power now        $power"
+  echo "  Power now        The laptop is on $power power."
   echo
-  echo "  Idle after       10 minutes"
+  echo "  Idle after       The idle threshold is 10 minutes by default."
   if [ -e "$sleep_config" ]; then
     delay="$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
-    echo "  Hibernate        ${delay:-?} after suspend"
+    echo "  Hibernate        It hibernates ${delay:-?} after suspend."
   else
-    echo "  Hibernate        not configured"
+    echo "  Hibernate        Hibernation is not configured."
   fi
   echo
 
   if is_enabled; then
-    echo "  State            on"
+    echo "  State            The tweak is on."
   else
-    echo "  State            incomplete"
+    echo "  State            The tweak is not fully enabled."
   fi
 }
 

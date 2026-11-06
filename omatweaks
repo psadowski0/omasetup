@@ -19,14 +19,14 @@ Usage: omatweaks <command>
 Small, reversible tweaks for Omarchy.
 
 Commands:
-  list                  List available tweaks
-  <tweak> enable        Turn a tweak on
-  <tweak> disable       Turn a tweak off and remove its files
-  <tweak> status        Show what a tweak is doing
-  link                  Put the omatweaks command on your PATH
-  unlink                Remove that command
-  update                Update this checkout
-  version               Show the installed version
+  list                  List the available tweaks.
+  <tweak> enable        Turn a tweak on.
+  <tweak> disable       Turn a tweak off and remove its files.
+  <tweak> status        Show what a tweak is doing.
+  link                  Put the omatweaks command on your PATH.
+  unlink                Remove that command.
+  update                Update this checkout.
+  version               Show the installed version.
 
 Examples:
   omatweaks list
@@ -37,7 +37,7 @@ EOF
 }
 
 if [ "$(id -u)" -eq 0 ]; then
-  echo "omatweaks: run as your normal user, not root." >&2
+  echo "omatweaks: Run as your normal user, not as root." >&2
   exit 1
 fi
 
@@ -45,14 +45,14 @@ feature_script() {
   local name="$1"
   case "$name" in
     ''|*[!a-z0-9-]*|[!a-z0-9]*)
-      echo "omatweaks: invalid tweak name: $name" >&2
+      echo "omatweaks: \"$name\" is not a valid tweak name." >&2
       return 1
       ;;
   esac
 
   local script="$repo_dir/tweaks/$name/$name.sh"
   if [ ! -f "$script" ]; then
-    echo "omatweaks: unknown tweak: $name" >&2
+    echo "omatweaks: There is no tweak named \"$name\"." >&2
     return 1
   fi
 
@@ -61,7 +61,7 @@ feature_script() {
 
 list_features() {
   local dir name script summary state found=0
-  echo "Tweaks"
+  echo "Available tweaks:"
   for dir in "$repo_dir"/tweaks/*/; do
     [ -d "$dir" ] || continue
     name="$(basename -- "$dir")"
@@ -78,20 +78,20 @@ list_features() {
     printf '  %-16s %-9s %s\n' "$name" "$state" "$summary"
     found=1
   done
-  [ "$found" -eq 1 ] || echo "  (no tweaks found)"
+  [ "$found" -eq 1 ] || echo "  No tweaks were found."
 }
 
 version() {
   if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
-    git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown"
+    git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed."
   else
-    echo "unknown (not a git checkout)"
+    echo "unknown: this is not a git checkout."
   fi
 }
 
 update() {
   if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
-    echo "omatweaks: not a git checkout; download a fresh copy instead." >&2
+    echo "omatweaks: This is not a git checkout. Download a fresh copy instead." >&2
     exit 1
   fi
 
@@ -105,21 +105,21 @@ link_command() {
   link="$bin_dir/omatweaks"
 
   if [ -e "$link" ] && [ ! -L "$link" ]; then
-    echo "omatweaks: $link already exists and is not a symlink; refusing to overwrite." >&2
+    echo "omatweaks: $link already exists and is not a symlink, so omatweaks will not overwrite it." >&2
     exit 1
   fi
   if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$repo_dir/omatweaks" ]; then
-    echo "omatweaks: $link points elsewhere; refusing to overwrite." >&2
+    echo "omatweaks: $link points to another checkout, so omatweaks will not overwrite it." >&2
     exit 1
   fi
 
   mkdir -p -- "$bin_dir"
   ln -sfn -- "$repo_dir/omatweaks" "$link"
-  echo "Linked $link -> $repo_dir/omatweaks"
+  echo "Linked $link to $repo_dir/omatweaks."
 
   case ":$PATH:" in
-    *":$bin_dir:"*) echo "Run: omatweaks list" ;;
-    *) echo "Warning: $bin_dir is not in PATH; add it or use $repo_dir/omatweaks." >&2 ;;
+    *":$bin_dir:"*) echo "Run 'omatweaks list' to see what is available." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $repo_dir/omatweaks directly." >&2 ;;
   esac
 }
 
@@ -130,12 +130,12 @@ unlink_command() {
 
   if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$repo_dir/omatweaks" ]; then
     rm -f -- "$link"
-    echo "Removed $link"
+    echo "Removed $link."
   elif [ -e "$link" ]; then
-    echo "omatweaks: $link does not point at this checkout; not removing." >&2
+    echo "omatweaks: $link does not point at this checkout, so omatweaks will not remove it." >&2
     exit 1
   else
-    echo "No link at $link."
+    echo "There is no link at $link."
   fi
 }
 

@@ -1,7 +1,7 @@
 # Test log
 
 `auto-hibernate` was tested on real hardware, by a human, on 6 November 2026.
-The hardware tests ran on `v0.7.0`. `v0.7.1` changes only wording,
+The hardware tests ran on `v0.7.0`. Later releases change only wording,
 documentation, and graphics.
 
 ## The machine
@@ -40,13 +40,14 @@ that default was tested separately.
 | 8 | Early-wake race (#38193) | suspend 14:03:53 → woke early 14:04:09 → retried and hibernated 14:08:07 |
 | 9 | Disable → enable | all three drop-ins and the timer removed, then restored; no leftovers |
 
-Also checked: `bash -n`, ShellCheck 0.10.0 `-S warning`, `omatweaks list`,
-`status --quiet` (exit 0), and CI on GitHub.
+Additional checks passed: `bash -n`, ShellCheck 0.10.0 `-S warning`,
+`omatweaks list`, and `status --quiet` (exit 0). GitHub CI also passed.
 
 ## Not tested on purpose
 
-- **Below 5% battery.** Draining the battery to force it is unsafe.
-- **Hybrid sleep.** This tweak does not change it.
+- **Below 5% battery:** Draining the battery to force this case is unsafe, so it
+  was not tested.
+- **Hybrid sleep:** This tweak does not change it, so there is nothing to test.
 
 ## Known systemd quirk
 
@@ -61,5 +62,5 @@ systemd PR #44650.
 - The battery path works end to end: suspend, hibernate, resume.
 - AC never hibernates while the charger stays connected.
 - Unplugging while suspended still protects the battery.
-- Video/call/stay-awake are respected.
+- Video, calls, and stay-awake are respected.
 - Removal is clean and repeatable.

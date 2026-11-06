@@ -143,9 +143,9 @@ clear_state
 
 if [ "$retry" -eq 1 ]; then
   /usr/bin/printf '%s\n' "$last_suspend" > "$HANDLED_FILE"
-  echo "omatweaks-auto-hibernate: previous suspend did not hibernate; hibernating now"
+  echo "omatweaks-auto-hibernate: The previous suspend did not hibernate, so the laptop is hibernating now."
   /usr/bin/systemctl --no-block hibernate
 else
-  echo "omatweaks-auto-hibernate: idle on battery; suspending"
+  echo "omatweaks-auto-hibernate: The laptop is idle on battery, so it is suspending now."
   /usr/bin/systemctl --no-block suspend-then-hibernate
 fi

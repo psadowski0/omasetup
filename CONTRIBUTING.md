@@ -20,7 +20,8 @@ tweaks/my-tweak/my-tweak.sh status
 
 Rules:
 
-- Put `# Summary: ...` on the second line. `omatweaks list` reads it.
+- Put a complete one-line `# Summary: ...` on the second line. `omatweaks list`
+  reads it.
 - Support `status --quiet`: print nothing and exit 0 only when the tweak is
   fully enabled. `omatweaks list` uses it to show `enabled` / `disabled`.
 - `enable` must be idempotent and add only what the tweak needs.
@@ -31,6 +32,14 @@ Rules:
 - Do not depend on another tweak.
 - Add a short user-facing section to `README.md`. Put deeper details in
   `docs/` and test evidence in `docs/testing.md`.
+
+## User-facing text
+
+Write short, complete sentences. Avoid clipped phrases such as "what is
+available" or "turn it on". If an idea needs a longer sentence, write the
+longer sentence instead of removing words that make it clear.
+
+This rule applies to the README, help output, status messages, and errors.
 
 Before committing:
 
