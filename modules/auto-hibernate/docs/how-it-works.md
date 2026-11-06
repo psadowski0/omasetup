@@ -1,7 +1,8 @@
 # How auto-hibernate works
 
-The tweak plugs into the sleep system already provided by systemd and Omarchy.
-`enable` adds a few drop-in files, and `disable` removes them.
+auto-hibernate plugs into the sleep system already provided by systemd and
+Omarchy. The `enable` command adds a few drop-in files, and `disable` removes
+them. The module does not depend on the Omasetup app.
 
 ## The short version
 
@@ -10,8 +11,8 @@ The tweak plugs into the sleep system already provided by systemd and Omarchy.
   `HibernateOnACPower=no` keeps it suspended while AC stays connected. If you
   unplug while suspended, the laptop hibernates at the next check (within 2 h).
 - **Idle:** a user timer runs once a minute. When Omarchy reports the session as
-  idle, it suspends; systemd hibernates later. It respects video/call inhibitors
-  and the stay-awake toggle.
+  idle, it suspends; systemd hibernates later. It respects video and call
+  inhibitors and the stay-awake toggle.
 - **Early wake:** if systemd wakes after its timer but skips hibernation
   (systemd issue #38193), the next idle check notices the missing hibernation
   and hibernates after one minute of idle instead of sleeping again.
@@ -20,43 +21,39 @@ The tweak plugs into the sleep system already provided by systemd and Omarchy.
 
 ## Settings
 
-- **Idle time:** `IDLE_MINUTES` in `tweaks/auto-hibernate/idle-check.sh`
-  (default `10`). Revert that edit before `omatweaks update`.
+- **Idle time:** `IDLE_MINUTES` in `modules/auto-hibernate/idle-check.sh`
+  (default `10`). Revert that edit before `auto-hibernate update`.
 - **Hibernate delay:** `HibernateDelaySec=` in
-  `/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf`
+  `/etc/systemd/sleep.conf.d/60-auto-hibernate.conf`
   (default `2h`). This also sets how often an AC suspend checks the power
   source.
 
 ## Files
 
-`enable` adds these files, and `disable` removes them:
+The `enable` command adds these files, and `disable` removes them:
 
 ```
-~/.config/systemd/user/omatweaks-auto-hibernate.service
-~/.config/systemd/user/omatweaks-auto-hibernate.timer
-~/.config/systemd/user/timers.target.wants/omatweaks-auto-hibernate.timer
-/run/user/$UID/omatweaks-auto-hibernate.since
-/run/user/$UID/omatweaks-auto-hibernate.handled
-/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
-/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
-/etc/systemd/system/systemd-suspend.service.d/60-omatweaks-auto-hibernate.conf
+~/.config/systemd/user/auto-hibernate.service
+~/.config/systemd/user/auto-hibernate.timer
+~/.config/systemd/user/timers.target.wants/auto-hibernate.timer
+/run/user/$UID/auto-hibernate.since
+/run/user/$UID/auto-hibernate.handled
+/etc/systemd/logind.conf.d/30-auto-hibernate.conf
+/etc/systemd/sleep.conf.d/60-auto-hibernate.conf
+/etc/systemd/system/systemd-suspend.service.d/60-auto-hibernate.conf
 ```
-
-Older versions used different names. `enable` and `disable` also remove the old
-files, so upgrading only requires running `omatweaks auto-hibernate enable` once
-more.
 
 ## Requirements
 
-The tweak needs Omarchy, systemd, `jq`, `git`, and working hibernation. Check
+The module needs Omarchy, systemd, `jq`, `git`, and working hibernation. Check
 with `omarchy-hibernation-available`.
 
 ## Troubleshooting
 
 ```bash
-omatweaks auto-hibernate status
-systemctl --user status omatweaks-auto-hibernate.timer
-journalctl --user -u omatweaks-auto-hibernate.service -n 50
+auto-hibernate status
+systemctl --user status auto-hibernate.timer
+journalctl --user -u auto-hibernate.service -n 50
 systemd-analyze cat-config systemd/sleep.conf | grep HibernateDelaySec
 journalctl -b | grep -E 'PM: hibernation|Performing sleep operation'
 ```
@@ -65,5 +62,5 @@ If it suspends but never hibernates, look for
 `System returned from sleep operation 'suspend-then-hibernate'` without
 `Performing sleep operation 'hibernate'`. That is systemd issue #38193: the
 wake alarm can fire a fraction early and systemd treats it as a manual wake.
-The tweak retries after one minute of idle. A permanent fix is in systemd
+The module retries after one minute of idle. A permanent fix is in systemd
 PR #44650.

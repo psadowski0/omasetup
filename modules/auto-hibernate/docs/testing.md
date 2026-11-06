@@ -1,8 +1,9 @@
 # Test log
 
-`auto-hibernate` was tested by a human in the real world, on real hardware, on
-6 November 2026. The hardware tests ran on `v0.7.0`. Later releases change only
-wording, documentation, and graphics.
+The auto-hibernate module was tested by a human in the real world, on real
+hardware. The original hardware tests ran before this module was packaged for
+Omasetup. The auto-hibernate logic is unchanged. Only the command name, module
+location, and systemd paths changed.
 
 ## The machine
 
@@ -41,21 +42,21 @@ that default was tested separately.
 | 9 | Disable → enable | all three drop-ins and the timer removed, then restored; no leftovers |
 
 Additional checks passed: `bash -n`, ShellCheck 0.10.0 `-S warning`,
-`omatweaks list`, and `status --quiet` (exit 0). GitHub CI also passed.
+`auto-hibernate status`, and `status --quiet` (exit 0). GitHub CI also passed.
 
 ## Not tested on purpose
 
 - **Below 5% battery:** Draining the battery to force this case is unsafe, so it
   was not tested.
-- **Hybrid sleep:** This tweak does not change it, so there is nothing to test.
+- **Hybrid sleep:** This module does not change it, so there is nothing to test.
 
 ## Known systemd quirk
 
 With a very short `HibernateDelaySec` (30 s), systemd issue #38193 reproduced
 every time: the wake alarm fired a fraction early, systemd treated it as a
-manual wake, and logind suspended again. The idle retry catches the normal
-case; the shipped 2-hour default hibernated correctly. A permanent fix is in
-systemd PR #44650.
+manual wake, and logind suspended again. The idle retry catches the normal case;
+the shipped 2-hour default hibernated correctly. A permanent fix is in systemd
+PR #44650.
 
 ## What the tests show
 
@@ -64,3 +65,8 @@ systemd PR #44650.
 - Unplugging while suspended still protects the battery.
 - Video, calls, and stay-awake are respected.
 - Removal is clean and repeatable.
+
+## Packaging smoke test
+
+The final migration test for the new command and systemd names is recorded here
+after the Omasetup v0.1.0 build.

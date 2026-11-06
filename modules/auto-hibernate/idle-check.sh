@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run once a minute by omatweaks-auto-hibernate.timer.
+# Run once a minute by auto-hibernate.timer.
 #
 # Hibernate after a period of continuous idle while on battery. It uses
 # Omarchy's own idle state, so it is input-aware, respects inhibitors
@@ -23,8 +23,8 @@ set -u
 IDLE_MINUTES="${IDLE_MINUTES:-10}"
 
 OMARCHY_BIN=/usr/share/omarchy/bin
-STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.since"
-HANDLED_FILE="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.handled"
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/auto-hibernate.since"
+HANDLED_FILE="${XDG_RUNTIME_DIR:-/tmp}/auto-hibernate.handled"
 
 # A gap this large between runs means the machine was suspended/hibernated.
 GAP_RESET_SECONDS=90
@@ -143,9 +143,9 @@ clear_state
 
 if [ "$retry" -eq 1 ]; then
   /usr/bin/printf '%s\n' "$last_suspend" > "$HANDLED_FILE"
-  echo "omatweaks-auto-hibernate: The previous suspend did not hibernate, so the laptop is hibernating now."
+  echo "auto-hibernate: The previous suspend did not hibernate, so the laptop is hibernating now."
   /usr/bin/systemctl --no-block hibernate
 else
-  echo "omatweaks-auto-hibernate: The laptop is idle on battery, so it is suspending now."
+  echo "auto-hibernate: The laptop is idle on battery, so it is suspending now."
   /usr/bin/systemctl --no-block suspend-then-hibernate
 fi

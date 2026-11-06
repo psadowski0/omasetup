@@ -12,10 +12,10 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n omatweaks
-          find . -path ./.git -prune -o -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          find modules -type f \( -name '*.sh' -o -perm -u+x \) -print0 |
+            xargs -0 -r -n1 bash -n
 
       - name: ShellCheck
         run: |
-          shellcheck -S warning omatweaks
-          find . -path ./.git -prune -o -name '*.sh' -print0 | xargs -0 -r shellcheck -S warning
+          find modules -type f \( -name '*.sh' -o -perm -u+x \) -print0 |
+            xargs -0 -r shellcheck -S warning

@@ -1,15 +1,11 @@
 #!/bin/bash
-# Root helper for the auto-hibernate tweak. Called through sudo by
-# auto-hibernate.sh; not meant to be run directly.
+# Root helper for the auto-hibernate module. Called through sudo by
+# auto-hibernate; not meant to be run directly.
 set -euo pipefail
 
-logind_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
-sleep_config=/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
-manual_config=/etc/systemd/system/systemd-suspend.service.d/60-omatweaks-auto-hibernate.conf
-old_logind_configs=(
-  /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
-  /etc/systemd/logind.conf.d/30-lid-battery.conf
-)
+logind_config=/etc/systemd/logind.conf.d/30-auto-hibernate.conf
+sleep_config=/etc/systemd/sleep.conf.d/60-auto-hibernate.conf
+manual_config=/etc/systemd/system/systemd-suspend.service.d/60-auto-hibernate.conf
 
 usage() {
   echo "Usage: sudo $0 {install|uninstall}" >&2
@@ -30,10 +26,9 @@ prop() {
 
 install() {
   mkdir -p -- "$(dirname -- "$logind_config")" "$(dirname -- "$sleep_config")"
-  rm -f -- "${old_logind_configs[@]}"
 
   cat > "$logind_config" <<'EOF'
-# Omatweaks: auto-hibernate.
+# Auto-hibernate.
 #
 # On battery: suspend first, then hibernate after HibernateDelaySec.
 # On AC: also suspend-then-hibernate, but HibernateOnACPower=no keeps it
@@ -48,7 +43,7 @@ HandleLidSwitchExternalPower=suspend-then-hibernate
 EOF
 
   cat > "$sleep_config" <<'EOF'
-# Omatweaks: auto-hibernate.
+# Auto-hibernate.
 #
 # systemd only applies a timeout to suspend-then-hibernate on a laptop with a
 # battery when HibernateDelaySec is set explicitly. Without it, the laptop
@@ -66,7 +61,7 @@ EOF
   # battery-aware suspend-then-hibernate the lid and idle paths already use.
   mkdir -p -- "$(dirname -- "$manual_config")"
   cat > "$manual_config" <<'EOF'
-# Omatweaks: auto-hibernate.
+# Auto-hibernate.
 #
 # Every plain suspend becomes suspend-then-hibernate. On battery it hibernates
 # after HibernateDelaySec; HibernateOnACPower=no keeps it suspended on AC.
@@ -104,7 +99,7 @@ EOF
 }
 
 uninstall() {
-  rm -f -- "$logind_config" "$sleep_config" "$manual_config" "${old_logind_configs[@]}"
+  rm -f -- "$logind_config" "$sleep_config" "$manual_config"
   rmdir --ignore-fail-on-non-empty "$(dirname -- "$manual_config")" 2>/dev/null || true
 
   systemctl daemon-reload

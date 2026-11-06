@@ -1,0 +1,315 @@
+#!/bin/bash
+# Summary: Suspend on battery, then hibernate before the battery dies.
+set -euo pipefail
+
+# Resolve symlinks so the command works through ~/.local/bin/auto-hibernate.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+repo_dir="$(cd -P -- "$script_dir/../.." && pwd)"
+idle_check="$script_dir/idle-check.sh"
+system_helper="$script_dir/system.sh"
+
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+service="$unit_dir/auto-hibernate.service"
+timer="$unit_dir/auto-hibernate.timer"
+state_file="${XDG_RUNTIME_DIR:-/tmp}/auto-hibernate.since"
+handled_file="${XDG_RUNTIME_DIR:-/tmp}/auto-hibernate.handled"
+
+lid_config=/etc/systemd/logind.conf.d/30-auto-hibernate.conf
+sleep_config=/etc/systemd/sleep.conf.d/60-auto-hibernate.conf
+manual_config=/etc/systemd/system/systemd-suspend.service.d/60-auto-hibernate.conf
+
+usage() {
+  local code="${1:-2}"
+  cat >&2 <<'EOF'
+Usage: auto-hibernate <command>
+
+Commands:
+  enable    Turn auto-hibernate on.
+  disable   Turn it off and remove its files.
+  status    Show what auto-hibernate is doing.
+  link      Put the auto-hibernate command on your PATH.
+  unlink    Remove that command.
+  update    Update this checkout.
+  version   Show the installed version.
+
+Examples:
+  auto-hibernate status
+  auto-hibernate enable
+  auto-hibernate disable
+EOF
+  exit "$code"
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "auto-hibernate: Run as your normal user, not as root." >&2
+  exit 1
+fi
+
+logind_prop() {
+  busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager "$1" 2>/dev/null | cut -d'"' -f2 || true
+}
+
+lid_enabled() {
+  [ "$(logind_prop HandleLidSwitch)" = "suspend-then-hibernate" ] &&
+    [ "$(logind_prop HandleLidSwitchExternalPower)" = "suspend-then-hibernate" ]
+}
+
+manual_enabled() {
+  [ -e "$manual_config" ] &&
+    grep -q '^ExecStart=/usr/lib/systemd/systemd-sleep suspend-then-hibernate' "$manual_config"
+}
+
+configs_installed() {
+  [ -e "$sleep_config" ] || [ -e "$manual_config" ] || [ -e "$lid_config" ]
+}
+
+timer_running() {
+  [ "$(systemctl --user is-enabled auto-hibernate.timer 2>/dev/null || true)" = "enabled" ] &&
+    [ "$(systemctl --user is-active auto-hibernate.timer 2>/dev/null || true)" = "active" ]
+}
+
+is_enabled() {
+  lid_enabled && timer_running && [ -e "$sleep_config" ] &&
+    grep -q '^HibernateOnACPower=no' "$sleep_config" &&
+    manual_enabled
+}
+
+idle_install() {
+  chmod +x -- "$idle_check"
+  mkdir -p -- "$unit_dir"
+
+  cat > "$service" <<EOF
+[Unit]
+Description=Auto-hibernate: Hibernates automatically on battery
+
+[Service]
+Type=oneshot
+ExecStart="$idle_check"
+EOF
+
+  cat > "$timer" <<'EOF'
+[Unit]
+Description=Auto-hibernate: Checks for idle time on battery
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now auto-hibernate.timer
+}
+
+idle_remove() {
+  systemctl --user disable --now auto-hibernate.timer 2>/dev/null || true
+  systemctl --user reset-failed auto-hibernate.service 2>/dev/null || true
+  rm -f -- "$service" "$timer" "$state_file" "$handled_file"
+  systemctl --user daemon-reload
+}
+
+enable() {
+  if [ -x /usr/share/omarchy/bin/omarchy-hibernation-available ] &&
+    ! /usr/share/omarchy/bin/omarchy-hibernation-available; then
+    echo "Hibernation is not available on this machine." >&2
+    echo "Enable hibernation first by running 'omarchy-hibernation-setup', then try again." >&2
+    exit 1
+  fi
+
+  echo "auto-hibernate is applying the lid and sleep policy (sudo)..."
+  sudo "$system_helper" install
+  echo
+
+  echo "auto-hibernate is installing the idle timer..."
+  idle_install
+  echo
+
+  echo "auto-hibernate is on."
+  echo "  To turn it off, run 'auto-hibernate disable'."
+}
+
+disable() {
+  if configs_installed; then
+    echo "auto-hibernate is removing the lid and sleep policy (sudo)..."
+    sudo "$system_helper" uninstall
+    echo
+  else
+    echo "The lid and sleep policy are not installed, so sudo is not needed."
+  fi
+
+  echo "auto-hibernate is removing the idle timer..."
+  idle_remove
+  echo
+
+  echo "auto-hibernate is off."
+}
+
+print_status() {
+  local lid ext timer_enabled timer_active power delay
+
+  lid="$(logind_prop HandleLidSwitch)"
+  ext="$(logind_prop HandleLidSwitchExternalPower)"
+  timer_enabled="$(systemctl --user is-enabled auto-hibernate.timer 2>/dev/null || true)"
+  timer_active="$(systemctl --user is-active auto-hibernate.timer 2>/dev/null || true)"
+
+  if omarchy-power-present 2>/dev/null; then
+    power="AC"
+  else
+    power="battery"
+  fi
+
+  echo "auto-hibernate"
+  echo
+
+  if [ "$lid" = "suspend-then-hibernate" ] && [ "$ext" = "suspend-then-hibernate" ]; then
+    echo "  Lid on battery   It suspends, then hibernates."
+  elif [ "$lid" = "suspend" ] && [ -z "$ext" ]; then
+    echo "  Lid on battery   It suspends only, because the module is off."
+  else
+    echo "  Lid on battery   The setting is ${lid:-unknown}."
+  fi
+
+  if [ "$ext" = "suspend-then-hibernate" ]; then
+    echo "  Lid on AC        It suspends and never hibernates while the charger is connected."
+  elif [ "$ext" = "suspend" ]; then
+    echo "  Lid on AC        It suspends only, which is safe."
+  else
+    echo "  Lid on AC        The setting is ${ext:-unset}."
+  fi
+
+  if manual_enabled; then
+    echo "  Manual suspend   It suspends, then hibernates."
+  else
+    echo "  Manual suspend   It suspends only, because the module is off."
+  fi
+
+  if [ "$timer_enabled" = "enabled" ] && [ "$timer_active" = "active" ]; then
+    echo "  Idle timer       The timer is on."
+  elif [ "$timer_enabled" = "enabled" ]; then
+    echo "  Idle timer       The timer is on, but it is not running."
+  elif [ -f "$timer" ]; then
+    echo "  Idle timer       The timer is installed, but it is off."
+  else
+    echo "  Idle timer       The timer is not installed."
+  fi
+
+  echo "  Power now        The laptop is on $power power."
+  echo
+  echo "  Idle after       The idle threshold is 10 minutes by default."
+  if [ -e "$sleep_config" ]; then
+    delay="$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
+    echo "  Hibernate        It hibernates ${delay:-?} after suspend."
+  else
+    echo "  Hibernate        Hibernation is not configured."
+  fi
+  echo
+
+  if is_enabled; then
+    echo "  State            The module is on."
+  else
+    echo "  State            The module is not fully enabled."
+  fi
+}
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'auto-hibernate %s\n' \
+      "$(git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed.")"
+  else
+    echo "auto-hibernate unknown: this is not a git checkout."
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "auto-hibernate: This is not a git checkout. Download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  version
+}
+
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/auto-hibernate"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "auto-hibernate: $link already exists and is not a symlink, so auto-hibernate will not overwrite it." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$script_dir/auto-hibernate" ]; then
+    echo "auto-hibernate: $link points to another checkout, so auto-hibernate will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$script_dir/auto-hibernate" "$link"
+  echo "Linked $link to $script_dir/auto-hibernate."
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run 'auto-hibernate enable' to turn it on." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $script_dir/auto-hibernate directly." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/auto-hibernate"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$script_dir/auto-hibernate" ]; then
+    rm -f -- "$link"
+    echo "Removed $link."
+  elif [ -e "$link" ]; then
+    echo "auto-hibernate: $link does not point at this checkout, so auto-hibernate will not remove it." >&2
+    exit 1
+  else
+    echo "There is no link at $link."
+  fi
+}
+
+case "${1:-}" in
+  enable)
+    enable
+    ;;
+  disable)
+    disable
+    ;;
+  status)
+    if [ "${2:-}" = "--quiet" ]; then
+      is_enabled
+    else
+      print_status
+    fi
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
+    ;;
+  update)
+    update
+    ;;
+  version|--version)
+    version
+    ;;
+  -h|--help|help)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
