@@ -165,7 +165,7 @@ print_status() {
 
   echo "  Power now        $power"
   echo
-  echo "  Idle after       10 minutes"
+  echo "  Idle after       10 minutes (default)"
   echo "  Hibernate        2 hours after suspend (systemd default)"
   echo
 

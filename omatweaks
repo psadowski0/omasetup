@@ -2,6 +2,7 @@
 # Omatweaks: small, reversible tweaks for Omarchy.
 set -euo pipefail
 
+# Resolve symlinks so `omatweaks` works through ~/.local/bin/omatweaks.
 source_path="${BASH_SOURCE[0]}"
 while [ -L "$source_path" ]; do
   source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
