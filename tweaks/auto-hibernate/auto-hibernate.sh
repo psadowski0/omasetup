@@ -10,10 +10,14 @@ unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 service="$unit_dir/omatweaks-auto-hibernate.service"
 timer="$unit_dir/omatweaks-auto-hibernate.timer"
 state_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.since"
-attempt_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.attempt"
+handled_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.handled"
+old_runtime_files=(
+  "${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.attempt"
+)
 
 lid_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
 sleep_config=/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
+manual_config=/etc/systemd/system/systemd-suspend.service.d/60-omatweaks-auto-hibernate.conf
 old_lid_configs=(
   /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
   /etc/systemd/logind.conf.d/30-lid-battery.conf
@@ -54,9 +58,15 @@ lid_enabled() {
     [ "$(logind_prop HandleLidSwitchExternalPower)" = "suspend-then-hibernate" ]
 }
 
+manual_enabled() {
+  [ -e "$manual_config" ] &&
+    grep -q '^ExecStart=/usr/lib/systemd/systemd-sleep suspend-then-hibernate' "$manual_config"
+}
+
 configs_installed() {
   local config
   [ -e "$sleep_config" ] && return 0
+  [ -e "$manual_config" ] && return 0
   for config in "$lid_config" "${old_lid_configs[@]}"; do
     [ -e "$config" ] && return 0
   done
@@ -70,7 +80,8 @@ timer_running() {
 
 is_enabled() {
   lid_enabled && timer_running && [ -e "$sleep_config" ] &&
-    grep -q '^HibernateOnACPower=no' "$sleep_config"
+    grep -q '^HibernateOnACPower=no' "$sleep_config" &&
+    manual_enabled
 }
 
 cleanup_old() {
@@ -82,7 +93,7 @@ cleanup_old() {
     systemctl --user reset-failed "$unit" 2>/dev/null || true
   done
 
-  rm -f -- "${old_units[@]}" "${old_states[@]}" "${old_wants[@]}"
+  rm -f -- "${old_units[@]}" "${old_states[@]}" "${old_wants[@]}" "${old_runtime_files[@]}"
   systemctl --user daemon-reload 2>/dev/null || true
 }
 
@@ -119,11 +130,18 @@ EOF
 idle_remove() {
   systemctl --user disable --now omatweaks-auto-hibernate.timer 2>/dev/null || true
   systemctl --user reset-failed omatweaks-auto-hibernate.service 2>/dev/null || true
-  rm -f -- "$service" "$timer" "$state_file" "$attempt_file"
+  rm -f -- "$service" "$timer" "$state_file" "$handled_file" "${old_runtime_files[@]}"
   systemctl --user daemon-reload
 }
 
 enable() {
+  if [ -x /usr/share/omarchy/bin/omarchy-hibernation-available ] &&
+    ! /usr/share/omarchy/bin/omarchy-hibernation-available; then
+    echo "Hibernation is not available on this machine." >&2
+    echo "Enable hibernation first (omarchy-hibernation-setup), then retry." >&2
+    exit 1
+  fi
+
   echo "Applying lid and sleep policy (sudo)..."
   sudo "$system_helper" install
   echo
@@ -185,6 +203,12 @@ print_status() {
     echo "  Lid on AC        suspend (safe, never hibernates)"
   else
     echo "  Lid on AC        ${ext:-unset}"
+  fi
+
+  if manual_enabled; then
+    echo "  Manual suspend   suspend-then-hibernate (enabled)"
+  else
+    echo "  Manual suspend   plain suspend (not covered)"
   fi
 
   if [ "$timer_enabled" = "enabled" ] && [ "$timer_active" = "active" ]; then

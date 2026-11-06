@@ -5,6 +5,7 @@ set -euo pipefail
 
 logind_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
 sleep_config=/etc/systemd/sleep.conf.d/60-omatweaks-auto-hibernate.conf
+manual_config=/etc/systemd/system/systemd-suspend.service.d/60-omatweaks-auto-hibernate.conf
 old_logind_configs=(
   /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
   /etc/systemd/logind.conf.d/30-lid-battery.conf
@@ -60,6 +61,29 @@ HibernateDelaySec=2h
 HibernateOnACPower=no
 EOF
 
+  # Every plain suspend (power menu, suspend key, `systemctl suspend`, logind
+  # D-Bus, scripts) goes through systemd-suspend.service. Turn it into the same
+  # battery-aware suspend-then-hibernate the lid and idle paths already use.
+  mkdir -p -- "$(dirname -- "$manual_config")"
+  cat > "$manual_config" <<'EOF'
+# Omatweaks: auto-hibernate.
+#
+# Every plain suspend becomes suspend-then-hibernate. On battery it hibernates
+# after HibernateDelaySec; HibernateOnACPower=no keeps it suspended on AC.
+# Explicit `systemctl hibernate` and hybrid sleep are not affected.
+[Service]
+ExecStart=
+ExecStart=/usr/lib/systemd/systemd-sleep suspend-then-hibernate
+EOF
+
+  systemctl daemon-reload
+
+  if ! systemctl show systemd-suspend.service -p ExecStart |
+    grep -q 'suspend-then-hibernate'; then
+    echo "Failed to override systemd-suspend.service" >&2
+    exit 1
+  fi
+
   # logind supports reload, which is safer than restarting it.
   systemctl reload systemd-logind
 
@@ -71,14 +95,24 @@ EOF
 
   echo "Installed $logind_config"
   echo "Installed $sleep_config"
+  echo "Installed $manual_config"
   printf 'HandleLidSwitch=%s\n' "$(prop HandleLidSwitch)"
   printf 'HandleLidSwitchExternalPower=%s\n' "$(prop HandleLidSwitchExternalPower)"
   printf 'HibernateDelaySec=%s\n' "$(sed -n 's/^HibernateDelaySec=//p' "$sleep_config" | tail -n 1)"
   printf 'HibernateOnACPower=%s\n' "$(sed -n 's/^HibernateOnACPower=//p' "$sleep_config" | tail -n 1)"
+  printf 'Manual suspend=%s\n' "suspend-then-hibernate"
 }
 
 uninstall() {
-  rm -f -- "$logind_config" "$sleep_config" "${old_logind_configs[@]}"
+  rm -f -- "$logind_config" "$sleep_config" "$manual_config" "${old_logind_configs[@]}"
+  rmdir --ignore-fail-on-non-empty "$(dirname -- "$manual_config")" 2>/dev/null || true
+
+  systemctl daemon-reload
+
+  if systemctl show systemd-suspend.service -p ExecStart |
+    grep -q 'suspend-then-hibernate'; then
+    echo "systemd-suspend.service is still overridden by another drop-in." >&2
+  fi
 
   systemctl reload systemd-logind
 
@@ -90,6 +124,7 @@ uninstall() {
 
   echo "Removed $logind_config"
   echo "Removed $sleep_config"
+  echo "Removed $manual_config"
   printf 'HandleLidSwitch=%s\n' "$(prop HandleLidSwitch)"
   printf 'HandleLidSwitchExternalPower=%s\n' "$(prop HandleLidSwitchExternalPower)"
 }
