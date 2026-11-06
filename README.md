@@ -1,23 +1,21 @@
-<p align="center">
-  <img src="docs/tested-badge.svg" alt="Human-tested on real hardware" height="34">
-</p>
-
 # Omatweaks
+
+## What is Omatweaks?
 
 Omatweaks is a small collection of reversible tweaks for
 [Omarchy](https://omarchy.org/). One command turns a tweak on, and one command
-removes it.
+removes it. Omatweaks is unofficial and is not affiliated with Omarchy.
 
-**auto-hibernate** lets you close the lid and walk away. The laptop suspends
-first and then hibernates before the battery dies. When it is plugged in, it
-stays suspended instead.
+## How does it help you?
+
+The current tweak is **auto-hibernate**. It lets you close the lid and walk
+away. The laptop suspends first and then hibernates before the battery dies.
+When it is plugged in, it stays suspended instead.
 
 <img src="docs/auto-hibernate.svg" alt="Lid, idle, or manual suspend leads to suspend; on battery it hibernates after two hours; on AC it stays suspended" width="100%">
 
 **Suspend** resumes instantly, but it slowly drains the battery. **Hibernate**
 writes memory to disk, uses almost no power, and resumes in a few seconds.
-
-Omatweaks is unofficial and is not affiliated with Omarchy.
 
 ## Install
 
@@ -50,11 +48,16 @@ You can run `enable` and `disable` more than once. The tweak requires Omarchy,
 
 It also waits while you are watching a video, on a call, or using **stay awake**.
 
-## Tested on real hardware
+## Tested in the real world
 
-It was tested by a human, on real hardware, in real-world conditions. A person
-closed the real lid, plugged in and unplugged the real charger, and left the
-laptop idle. It was not a virtual machine or a simulation.
+<p align="center">
+  <img src="docs/tested-badge.svg" alt="Real-world tested on real hardware" height="34">
+</p>
+
+The **auto-hibernate** tweak was tested by a human, on real hardware, in
+real-world conditions. A person closed the real lid, plugged in and unplugged
+the real charger, and left the laptop idle. It was not a virtual machine or a
+simulation.
 
 | Scenario | Result |
 |---|---|

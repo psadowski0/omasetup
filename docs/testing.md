@@ -1,8 +1,8 @@
 # Test log
 
-`auto-hibernate` was tested on real hardware, by a human, on 6 November 2026.
-The hardware tests ran on `v0.7.0`. Later releases change only wording,
-documentation, and graphics.
+`auto-hibernate` was tested by a human in the real world, on real hardware, on
+6 November 2026. The hardware tests ran on `v0.7.0`. Later releases change only
+wording, documentation, and graphics.
 
 ## The machine
 
