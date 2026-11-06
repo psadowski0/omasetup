@@ -1,5 +1,5 @@
 #!/bin/bash
-# Summary: Lid and idle hibernate on battery; AC unchanged.
+# Summary: Hibernate automatically on battery; AC unchanged.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,16 +7,30 @@ idle_check="$script_dir/idle-check.sh"
 lid_helper="$script_dir/lid.sh"
 
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-service="$unit_dir/omatweaks-battery-hibernate.service"
-timer="$unit_dir/omatweaks-battery-hibernate.timer"
-state_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-battery-hibernate.since"
+service="$unit_dir/omatweaks-auto-hibernate.service"
+timer="$unit_dir/omatweaks-auto-hibernate.timer"
+state_file="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.since"
 
-lid_config=/etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
-legacy_lid_config=/etc/systemd/logind.conf.d/30-lid-battery.conf
+lid_config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
+old_lid_configs=(
+  /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
+  /etc/systemd/logind.conf.d/30-lid-battery.conf
+)
 
-legacy_service="$unit_dir/omarchy-idle-hibernate.service"
-legacy_timer="$unit_dir/omarchy-idle-hibernate.timer"
-legacy_state="${XDG_RUNTIME_DIR:-/tmp}/omarchy-idle-hibernate.since"
+old_units=(
+  "$unit_dir/omatweaks-battery-hibernate.service"
+  "$unit_dir/omatweaks-battery-hibernate.timer"
+  "$unit_dir/omarchy-idle-hibernate.service"
+  "$unit_dir/omarchy-idle-hibernate.timer"
+)
+old_states=(
+  "${XDG_RUNTIME_DIR:-/tmp}/omatweaks-battery-hibernate.since"
+  "${XDG_RUNTIME_DIR:-/tmp}/omarchy-idle-hibernate.since"
+)
+old_wants=(
+  "$unit_dir/timers.target.wants/omatweaks-battery-hibernate.timer"
+  "$unit_dir/timers.target.wants/omarchy-idle-hibernate.timer"
+)
 
 usage() {
   echo "Usage: $0 {enable|disable|status [--quiet]}" >&2
@@ -38,19 +52,33 @@ lid_enabled() {
     [ "$(logind_prop HandleLidSwitchExternalPower)" = "suspend" ]
 }
 
+lid_installed() {
+  local config
+  for config in "$lid_config" "${old_lid_configs[@]}"; do
+    [ -e "$config" ] && return 0
+  done
+  return 1
+}
+
 timer_running() {
-  [ "$(systemctl --user is-enabled omatweaks-battery-hibernate.timer 2>/dev/null || true)" = "enabled" ] &&
-    [ "$(systemctl --user is-active omatweaks-battery-hibernate.timer 2>/dev/null || true)" = "active" ]
+  [ "$(systemctl --user is-enabled omatweaks-auto-hibernate.timer 2>/dev/null || true)" = "enabled" ] &&
+    [ "$(systemctl --user is-active omatweaks-auto-hibernate.timer 2>/dev/null || true)" = "active" ]
 }
 
 is_enabled() {
   lid_enabled && timer_running
 }
 
-remove_legacy_idle() {
-  systemctl --user disable --now omarchy-idle-hibernate.timer 2>/dev/null || true
-  systemctl --user reset-failed omarchy-idle-hibernate.service 2>/dev/null || true
-  rm -f -- "$legacy_service" "$legacy_timer" "$legacy_state"
+cleanup_old() {
+  local unit
+  for unit in omatweaks-battery-hibernate.timer omarchy-idle-hibernate.timer; do
+    systemctl --user disable --now "$unit" 2>/dev/null || true
+  done
+  for unit in omatweaks-battery-hibernate.service omarchy-idle-hibernate.service; do
+    systemctl --user reset-failed "$unit" 2>/dev/null || true
+  done
+
+  rm -f -- "${old_units[@]}" "${old_states[@]}" "${old_wants[@]}"
   systemctl --user daemon-reload 2>/dev/null || true
 }
 
@@ -60,7 +88,7 @@ idle_install() {
 
   cat > "$service" <<EOF
 [Unit]
-Description=Omatweaks: hibernate when idle on battery
+Description=Omatweaks: hibernate automatically on battery
 
 [Service]
 Type=oneshot
@@ -69,7 +97,7 @@ EOF
 
   cat > "$timer" <<'EOF'
 [Unit]
-Description=Omatweaks: check for idle-on-battery hibernate
+Description=Omatweaks: check for auto-hibernate on battery
 
 [Timer]
 OnBootSec=2min
@@ -81,12 +109,12 @@ WantedBy=timers.target
 EOF
 
   systemctl --user daemon-reload
-  systemctl --user enable --now omatweaks-battery-hibernate.timer
+  systemctl --user enable --now omatweaks-auto-hibernate.timer
 }
 
 idle_remove() {
-  systemctl --user disable --now omatweaks-battery-hibernate.timer 2>/dev/null || true
-  systemctl --user reset-failed omatweaks-battery-hibernate.service 2>/dev/null || true
+  systemctl --user disable --now omatweaks-auto-hibernate.timer 2>/dev/null || true
+  systemctl --user reset-failed omatweaks-auto-hibernate.service 2>/dev/null || true
   rm -f -- "$service" "$timer" "$state_file"
   systemctl --user daemon-reload
 }
@@ -97,16 +125,16 @@ enable() {
   echo
 
   echo "Installing idle timer..."
-  remove_legacy_idle
+  cleanup_old
   idle_install
   echo
 
-  echo "Battery hibernate enabled."
-  echo "  Remove: omatweaks battery-hibernate disable"
+  echo "Auto hibernate enabled."
+  echo "  Remove: omatweaks auto-hibernate disable"
 }
 
 disable() {
-  if [ -e "$lid_config" ] || [ -e "$legacy_lid_config" ]; then
+  if lid_installed; then
     echo "Removing lid policy (sudo)..."
     sudo "$lid_helper" uninstall
     echo
@@ -116,10 +144,10 @@ disable() {
 
   echo "Removing idle timer..."
   idle_remove
-  remove_legacy_idle
+  cleanup_old
   echo
 
-  echo "Battery hibernate disabled."
+  echo "Auto hibernate disabled."
 }
 
 print_status() {
@@ -127,8 +155,8 @@ print_status() {
 
   lid="$(logind_prop HandleLidSwitch)"
   ext="$(logind_prop HandleLidSwitchExternalPower)"
-  timer_enabled="$(systemctl --user is-enabled omatweaks-battery-hibernate.timer 2>/dev/null || true)"
-  timer_active="$(systemctl --user is-active omatweaks-battery-hibernate.timer 2>/dev/null || true)"
+  timer_enabled="$(systemctl --user is-enabled omatweaks-auto-hibernate.timer 2>/dev/null || true)"
+  timer_active="$(systemctl --user is-active omatweaks-auto-hibernate.timer 2>/dev/null || true)"
 
   if omarchy-power-present 2>/dev/null; then
     power="AC"
@@ -136,7 +164,7 @@ print_status() {
     power="battery"
   fi
 
-  echo "Battery hibernate"
+  echo "Auto hibernate"
   echo
 
   if [ "$lid" = "suspend-then-hibernate" ] && [ "$ext" = "suspend" ]; then

@@ -1,10 +1,13 @@
 #!/bin/bash
-# Root helper for the battery-hibernate tweak. Called through sudo by
-# battery-hibernate.sh; not meant to be run directly.
+# Root helper for the auto-hibernate tweak. Called through sudo by
+# auto-hibernate.sh; not meant to be run directly.
 set -euo pipefail
 
-config=/etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
-legacy_config=/etc/systemd/logind.conf.d/30-lid-battery.conf
+config=/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
+old_configs=(
+  /etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
+  /etc/systemd/logind.conf.d/30-lid-battery.conf
+)
 
 usage() {
   echo "Usage: sudo $0 {install|uninstall}" >&2
@@ -25,10 +28,10 @@ prop() {
 
 install() {
   mkdir -p -- "$(dirname -- "$config")"
-  rm -f -- "$legacy_config"
+  rm -f -- "${old_configs[@]}"
 
   cat > "$config" <<'EOF'
-# Omatweaks: battery hibernate.
+# Omatweaks: auto-hibernate.
 #
 # On battery: suspend first, then hibernate after HibernateDelaySec
 # (2h by default) or when the battery drops below 5%, whichever comes first.
@@ -55,7 +58,7 @@ EOF
 }
 
 uninstall() {
-  rm -f -- "$config" "$legacy_config"
+  rm -f -- "$config" "${old_configs[@]}"
 
   systemctl reload systemd-logind
 

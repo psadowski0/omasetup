@@ -43,7 +43,7 @@ feature_script() {
       ;;
   esac
 
-  local script="$repo_dir/$name/$name.sh"
+  local script="$repo_dir/tweaks/$name/$name.sh"
   if [ ! -f "$script" ]; then
     echo "omatweaks: unknown tweak: $name" >&2
     return 1
@@ -53,12 +53,21 @@ feature_script() {
 }
 
 list_features() {
-  local dir name summary found=0
-  for dir in "$repo_dir"/*/; do
+  local dir name script summary state found=0
+  for dir in "$repo_dir"/tweaks/*/; do
+    [ -d "$dir" ] || continue
     name="$(basename -- "$dir")"
-    [ -f "$dir/$name.sh" ] || continue
-    summary="$(sed -n 's/^# Summary: //p' "$dir/$name.sh" | head -n 1)"
-    printf '  %-18s %s\n' "$name" "$summary"
+    script="$dir/$name.sh"
+    [ -f "$script" ] || continue
+
+    summary="$(sed -n 's/^# Summary: //p' "$script" | head -n 1)"
+    if "$script" status --quiet >/dev/null 2>&1; then
+      state="enabled"
+    else
+      state="disabled"
+    fi
+
+    printf '  %-16s %-9s %s\n' "$name" "$state" "$summary"
     found=1
   done
   [ "$found" -eq 1 ] || echo "  (no tweaks found)"

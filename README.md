@@ -1,9 +1,11 @@
 # Omatweaks
 
-Keep your Omarchy laptop from dying in your bag.
+A small command-line tool for [Omarchy](https://omarchy.org/). Each tweak fixes
+one real annoyance, and you can remove it completely.
 
-On battery, it suspends when you close the lid or leave it idle, then
-hibernates before the battery runs out. Plugged in, nothing changes.
+**Current tweak: `auto-hibernate`.** Your laptop is at 30%, you close the lid,
+throw it in a bag, and forget about it. This makes it suspend, then hibernate
+before the battery dies. Plugged in, nothing changes.
 
 Unofficial. Not affiliated with Omarchy.
 
@@ -20,50 +22,34 @@ git clone --depth=1 https://github.com/psadowski0/omatweaks.git \
 `link` puts the `omatweaks` command in `~/.local/bin`, which Omarchy already
 has on `PATH`.
 
-## Turn it on
+## Use
 
 ```bash
-omatweaks battery-hibernate enable
+omatweaks list                      # what's available and what's on
+omatweaks auto-hibernate enable     # turn a tweak on (asks for sudo once)
+omatweaks auto-hibernate status     # what's happening right now
+omatweaks auto-hibernate disable    # turn it off, remove everything
+omatweaks update                    # get the latest version
 ```
 
-It asks for your password once. That's it.
+`enable` and `disable` are safe to run more than once.
 
-## What happens
+## Tweaks
+
+| Tweak | What it does |
+|---|---|
+| `auto-hibernate` | Hibernate automatically on battery; AC unchanged. |
+
+More tweaks will be added here over time.
+
+## auto-hibernate
 
 | You... | On battery | Plugged in |
 |---|---|---|
 | Close the lid | suspend, then hibernate after 2h or below 5% | suspend only |
 | Leave it idle | suspend after ~10 min, then hibernate 2h later | nothing |
 
-It also waits if you are watching a video, on a call, or using "stay awake".
-
-## Check it
-
-```bash
-omatweaks battery-hibernate status
-```
-
-## Turn it off
-
-```bash
-omatweaks battery-hibernate disable
-```
-
-Removes everything `enable` added. No leftovers.
-
-## Update
-
-```bash
-omatweaks update
-```
-
-## Remove completely
-
-```bash
-omatweaks battery-hibernate disable
-omatweaks unlink
-rm -rf ~/.local/share/omatweaks
-```
+It waits if you are watching a video, on a call, or using "stay awake".
 
 ## Details
 
@@ -76,7 +62,7 @@ rm -rf ~/.local/share/omatweaks
 
 ### Settings
 
-- **Idle time:** `IDLE_MINUTES` in `battery-hibernate/idle-check.sh`
+- **Idle time:** `IDLE_MINUTES` in `tweaks/auto-hibernate/idle-check.sh`
   (default `10`). If you edit it, revert that edit before `update`.
 - **Hibernate delay:** add `HibernateDelaySec=1h` to
   `/etc/systemd/sleep.conf.d/` (default `2h`).
@@ -86,15 +72,15 @@ rm -rf ~/.local/share/omatweaks
 `enable` adds these, `disable` removes them:
 
 ```
-~/.config/systemd/user/omatweaks-battery-hibernate.service
-~/.config/systemd/user/omatweaks-battery-hibernate.timer
-~/.config/systemd/user/timers.target.wants/omatweaks-battery-hibernate.timer
-/run/user/$UID/omatweaks-battery-hibernate.since
-/etc/systemd/logind.conf.d/30-omatweaks-battery-hibernate.conf
+~/.config/systemd/user/omatweaks-auto-hibernate.service
+~/.config/systemd/user/omatweaks-auto-hibernate.timer
+~/.config/systemd/user/timers.target.wants/omatweaks-auto-hibernate.timer
+/run/user/$UID/omatweaks-auto-hibernate.since
+/etc/systemd/logind.conf.d/30-omatweaks-auto-hibernate.conf
 ```
 
-Upgrading from the first version? `enable` and `disable` also remove the old
-`omarchy-idle-hibernate.*` units and `30-lid-battery.conf`.
+Older versions used different names. `enable` and `disable` remove those old
+files too, so upgrading needs no manual cleanup.
 
 ### Requirements
 
@@ -103,9 +89,17 @@ Omarchy, systemd, `jq`, `git`, and working hibernation.
 ### Troubleshooting
 
 ```bash
-omatweaks battery-hibernate status
-systemctl --user status omatweaks-battery-hibernate.timer
-journalctl --user -u omatweaks-battery-hibernate.service -n 50
+omatweaks auto-hibernate status
+systemctl --user status omatweaks-auto-hibernate.timer
+journalctl --user -u omatweaks-auto-hibernate.service -n 50
+```
+
+## Remove completely
+
+```bash
+omatweaks auto-hibernate disable
+omatweaks unlink
+rm -rf ~/.local/share/omatweaks
 ```
 
 ## For maintainers

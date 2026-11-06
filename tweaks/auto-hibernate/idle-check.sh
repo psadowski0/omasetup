@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run once a minute by omatweaks-battery-hibernate.timer.
+# Run once a minute by omatweaks-auto-hibernate.timer.
 #
 # Hibernate after a period of continuous idle while on battery. It uses
 # Omarchy's own idle state, so it is input-aware, respects inhibitors
@@ -17,7 +17,7 @@ set -u
 IDLE_MINUTES="${IDLE_MINUTES:-10}"
 
 OMARCHY_BIN=/usr/share/omarchy/bin
-STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-battery-hibernate.since"
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/omatweaks-auto-hibernate.since"
 
 # A gap this large between runs means the machine was suspended/hibernated.
 GAP_RESET_SECONDS=90
