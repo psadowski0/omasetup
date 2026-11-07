@@ -16,20 +16,20 @@ Omasetup will let you:
 
 ## What works today?
 
-The first independent module is **auto-hibernate**. It runs on its own and does
-not need the Omasetup app. Omasetup will call the same command when the app is
-ready.
+Two independent modules work today: **auto-hibernate** and **unlock-themes**.
+They run on their own and do not need the Omasetup app. Omasetup will call the
+same commands when the app is ready.
 
 ## Modules
 
 | Module | Status | What it does |
 |---|---|---|
 | [auto-hibernate](modules/auto-hibernate/README.md) | Available | It suspends on battery, then hibernates before the battery dies. It never hibernates while the charger stays connected. |
+| [unlock-themes](modules/unlock-themes/README.md) | Available | It adds two logo-free unlock screens based on White and Vantablack. |
 
 ## Start here
 
-Read the [auto-hibernate README](modules/auto-hibernate/README.md) to install,
-use, update, and remove it.
+Read a module README to install, use, update, and remove it.
 
 ## Contributing
 

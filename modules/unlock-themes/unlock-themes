@@ -1,0 +1,323 @@
+#!/bin/bash
+# Summary: Add two logo-free unlock screens based on White and Vantablack.
+set -euo pipefail
+
+# Resolve symlinks so the command works through ~/.local/bin/unlock-themes.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+repo_dir="$(cd -P -- "$script_dir/../.." && pwd)"
+themes_src="$script_dir/themes"
+
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+
+themes_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/themes"
+theme_names=(white-no-logo vantablack-no-logo)
+marker=".omasetup-unlock-theme"
+
+usage() {
+  local code="${1:-2}"
+  cat >&2 <<'EOF'
+Usage: unlock-themes <command>
+
+Commands:
+  enable    Add the two logo-free unlock screens.
+  disable   Remove them and restore the default screen if needed.
+  status    Show whether the screens are installed and which one is active.
+  link      Put the unlock-themes command on your PATH.
+  unlink    Remove that command.
+  update    Update this checkout.
+  version   Show the installed version.
+
+Examples:
+  unlock-themes status
+  unlock-themes enable
+  unlock-themes disable
+EOF
+  exit "$code"
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "unlock-themes: Run as your normal user, not as root." >&2
+  exit 1
+fi
+
+theme_label() {
+  case "$1" in
+    white-no-logo) echo "White No Logo" ;;
+    vantablack-no-logo) echo "Vantablack No Logo" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+is_our_theme() {
+  case "$1" in
+    white-no-logo | vantablack-no-logo) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+theme_owned() {
+  local dir="$themes_dir/$1"
+
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$dir/$marker" ]
+}
+
+theme_installed() {
+  local name="$1"
+  local dir="$themes_dir/$name"
+
+  theme_owned "$name" &&
+    [ -f "$dir/colors.toml" ] &&
+    [ -f "$dir/unlock.png" ] &&
+    [ -f "$dir/preview-unlock.png" ]
+}
+
+theme_present() {
+  [ -e "$themes_dir/$1" ] || [ -L "$themes_dir/$1" ]
+}
+
+is_enabled() {
+  theme_installed white-no-logo && theme_installed vantablack-no-logo
+}
+
+require_omarchy() {
+  if ! command -v omarchy-plymouth-list >/dev/null 2>&1; then
+    echo "unlock-themes: Omarchy is not installed, so the unlock screens cannot be added." >&2
+    exit 1
+  fi
+  if [ ! -d "$themes_src" ]; then
+    echo "unlock-themes: The bundled theme files are missing from $themes_src." >&2
+    exit 1
+  fi
+}
+
+install_theme() {
+  local name="$1"
+  local src="$themes_src/$name"
+  local dest="$themes_dir/$name"
+
+  if [ ! -d "$src" ]; then
+    echo "unlock-themes: The bundled theme files are missing from $src." >&2
+    exit 1
+  fi
+
+  if theme_present "$name" && ! theme_owned "$name"; then
+    echo "unlock-themes: $dest already exists and was not created by unlock-themes, so it will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$dest"
+  cp -- "$src/colors.toml" "$dest/colors.toml"
+  cp -- "$src/unlock.png" "$dest/unlock.png"
+  cp -- "$src/preview-unlock.png" "$dest/preview-unlock.png"
+  cp -- "$src/$marker" "$dest/$marker"
+}
+
+enable() {
+  local name
+
+  require_omarchy
+  mkdir -p -- "$themes_dir"
+
+  echo "unlock-themes is adding the logo-free unlock screens..."
+  for name in "${theme_names[@]}"; do
+    install_theme "$name"
+    echo "  $(theme_label "$name")"
+  done
+  echo
+
+  if ! is_enabled; then
+    echo "unlock-themes: The screens were not installed correctly." >&2
+    exit 1
+  fi
+
+  echo "unlock-themes is on."
+  echo "Open Omarchy menu > Appearance > Unlock and choose a screen."
+  echo "These screens do not appear under Appearance > Theme."
+  echo "To remove them, run 'unlock-themes disable'."
+}
+
+disable() {
+  local active name present=0 installed=0 skipped=0
+
+  active=""
+  if command -v omarchy-plymouth-current >/dev/null 2>&1; then
+    active="$(omarchy-plymouth-current 2>/dev/null || true)"
+  fi
+
+  if is_our_theme "$active"; then
+    echo "The $(theme_label "$active") screen is active, so unlock-themes is restoring the default screen (sudo)..."
+    omarchy-plymouth-reset
+    echo
+  fi
+
+  for name in "${theme_names[@]}"; do
+    if theme_present "$name"; then
+      present=1
+    fi
+    if theme_installed "$name"; then
+      installed=1
+    fi
+  done
+
+  if [ "$present" -eq 0 ]; then
+    echo "The logo-free unlock screens are not installed, so there is nothing to remove."
+    return
+  fi
+
+  echo "unlock-themes is removing the logo-free unlock screens..."
+  for name in "${theme_names[@]}"; do
+    if theme_installed "$name"; then
+      rm -rf -- "${themes_dir:?}/$name"
+      echo "  $(theme_label "$name")"
+    elif theme_present "$name"; then
+      echo "unlock-themes: $themes_dir/$name was not created by unlock-themes, so it will not remove it." >&2
+      skipped=1
+    fi
+  done
+  echo
+
+  if [ "$installed" -ne 0 ]; then
+    echo "unlock-themes is off."
+  fi
+
+  if [ "$skipped" -ne 0 ]; then
+    exit 1
+  fi
+}
+
+print_status() {
+  local active name
+
+  echo "unlock-themes"
+  echo
+
+  for name in "${theme_names[@]}"; do
+    if theme_installed "$name"; then
+      printf '  %-20s It is installed.\n' "$(theme_label "$name")"
+    elif theme_owned "$name"; then
+      printf '  %-20s It is installed, but some files are missing.\n' "$(theme_label "$name")"
+    elif theme_present "$name"; then
+      printf '  %-20s Another file or theme uses this name.\n' "$(theme_label "$name")"
+    else
+      printf '  %-20s It is not installed.\n' "$(theme_label "$name")"
+    fi
+  done
+
+  active=""
+  if command -v omarchy-plymouth-current >/dev/null 2>&1; then
+    active="$(omarchy-plymouth-current 2>/dev/null || true)"
+  fi
+
+  echo
+  if [ -n "$active" ]; then
+    printf '  %-20s %s is active.\n' "Unlock screen" "$(theme_label "$active")"
+  else
+    printf '  %-20s The current screen could not be identified.\n' "Unlock screen"
+  fi
+  printf '  %-20s These screens do not appear there.\n' "Theme menu"
+
+  if is_enabled; then
+    printf '  %-20s The module is on.\n' "State"
+  else
+    printf '  %-20s The module is off.\n' "State"
+  fi
+}
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'unlock-themes %s\n' \
+      "$(git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed.")"
+  else
+    echo "unlock-themes unknown: this is not a git checkout."
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "unlock-themes: This is not a git checkout. Download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  version
+}
+
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/unlock-themes"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "unlock-themes: $link already exists and is not a symlink, so unlock-themes will not overwrite it." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$script_dir/unlock-themes" ]; then
+    echo "unlock-themes: $link points to another checkout, so unlock-themes will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$script_dir/unlock-themes" "$link"
+  echo "Linked $link to $script_dir/unlock-themes."
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run 'unlock-themes enable' to add the screens." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $script_dir/unlock-themes directly." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/unlock-themes"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$script_dir/unlock-themes" ]; then
+    rm -f -- "$link"
+    echo "Removed $link."
+  elif [ -e "$link" ]; then
+    echo "unlock-themes: $link does not point at this checkout, so unlock-themes will not remove it." >&2
+    exit 1
+  else
+    echo "There is no link at $link."
+  fi
+}
+
+case "${1:-}" in
+  enable)
+    enable
+    ;;
+  disable)
+    disable
+    ;;
+  status)
+    if [ "${2:-}" = "--quiet" ]; then
+      is_enabled
+    else
+      print_status
+    fi
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
+    ;;
+  update)
+    update
+    ;;
+  version | --version)
+    version
+    ;;
+  -h | --help | help)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
