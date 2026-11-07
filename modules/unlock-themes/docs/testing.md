@@ -23,6 +23,10 @@ each screen was applied through `omarchy-plymouth-set-by-theme`, and the module
 was disabled again. The apply step rebuilt the unified kernel image, as Omarchy
 does for every unlock theme change.
 
+The v0.2.1 layout uses fully transparent 800×378 logos. That is the same size
+as the original White and Vantablack logos, so Omarchy's layout code puts the
+password field back in the exact stock position.
+
 ## Results
 
 | # | Check | Result |
@@ -41,9 +45,19 @@ does for every unlock theme change.
 | 12 | Partial install repair | A missing `unlock.png` was reported, and `enable` restored it. |
 | 13 | Name collision | An unrelated directory with the same name was refused and left untouched. |
 | 14 | Preview files | Both 1920×1080 previews were rendered and checked by eye. |
+| 15 | Stock field position | The original White and Vantablack previews place the lock and field at `334×48+769+769`. |
+| 16 | Module field position | Both module previews match the stock position at `334×48+769+769`. |
 
-Both transparent logos have different bytes. That is what lets
-`omarchy-plymouth-current` tell the two screens apart.
+Both transparent logos are 800×378 RGBA images with different bytes. That is
+what lets `omarchy-plymouth-current` tell the two screens apart.
+
+## Why the logo file still exists
+
+Omarchy's Plymouth script always opens `logo.png` and sets
+`entry.y = logo.y + logo.height + 40`. A theme cannot omit the file, and a PNG
+cannot have a negative height. The 800×378 transparent image is an invisible
+layout spacer that keeps the field in the original position. It is not visible
+on the screen.
 
 ## Not tested
 

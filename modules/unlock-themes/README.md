@@ -11,7 +11,8 @@ White palette. The other uses the Vantablack palette. Both show no logo.
 ## How does it help you?
 
 You get a clean unlock screen without changing your desktop theme. The password
-field sits near the center of the screen, where the logo used to be.
+field stays exactly where the original White and Vantablack screens put it.
+Only the logo is removed.
 
 | White No Logo | Vantablack No Logo |
 |---|---|
@@ -69,8 +70,9 @@ unlock theme.
 
 The module was tested on 7 November 2026 on real hardware with Omarchy 4.5.0-3.
 Both screens were applied, Omarchy identified each one as active, and `disable`
-restored the default screen and removed the files. The machine was not rebooted,
-so the boot screen itself was not seen.
+restored the default screen and removed the files. The previews place the
+password field at the same coordinates as the original White and Vantablack
+previews. The machine was not rebooted, so the boot screen itself was not seen.
 
 The full evidence is in the [test log](docs/testing.md).
 
@@ -81,6 +83,11 @@ Run this command to get the latest version:
 ```bash
 unlock-themes update
 ```
+
+If the screens are already installed, run `unlock-themes enable` after updating
+so the installed files use the new version. If one of the screens is active,
+choose it again under **Appearance → Unlock** so the new layout reaches
+Plymouth.
 
 ## Remove
 
