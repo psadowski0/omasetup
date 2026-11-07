@@ -25,7 +25,7 @@ same commands when the app is ready.
 | Module | Status | What it does |
 |---|---|---|
 | [auto-hibernate](modules/auto-hibernate/README.md) | Available | It suspends on battery, then hibernates before the battery dies. It never hibernates while the charger stays connected. |
-| [unlock-themes](modules/unlock-themes/README.md) | Available | It adds two logo-free unlock screens based on White and Vantablack. |
+| [unlock-themes](modules/unlock-themes/README.md) | Available | It adds two logo-free unlock screens with an exactly centered password field, based on White and Vantablack. |
 
 ## Start here
 

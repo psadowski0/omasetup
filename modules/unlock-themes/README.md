@@ -6,17 +6,18 @@ on its own and does not need the Omasetup app.
 ## What is it?
 
 unlock-themes adds two unlock screens to **Appearance → Unlock**. One uses the
-White palette. The other uses the Vantablack palette. Both show no logo.
+White palette. The other uses the Vantablack palette. Both show no logo, and
+the password field is exactly centered.
 
 ## How does it help you?
 
 You get a clean unlock screen without changing your desktop theme. The password
-field stays exactly where the original White and Vantablack screens put it.
-Only the logo is removed.
+field is exactly centered, horizontally and vertically, and the lock icon stays
+slightly to its left. Stock unlock themes keep their original layout.
 
 | White No Logo | Vantablack No Logo |
 |---|---|
-| <img src="themes/white-no-logo/preview-unlock.png" alt="A white unlock screen with a centered password field and no logo" width="100%"> | <img src="themes/vantablack-no-logo/preview-unlock.png" alt="A black unlock screen with a centered password field and no logo" width="100%"> |
+| <img src="themes/white-no-logo/preview-unlock.png" alt="A white unlock screen with an exactly centered password field and no logo" width="100%"> | <img src="themes/vantablack-no-logo/preview-unlock.png" alt="A black unlock screen with an exactly centered password field and no logo" width="100%"> |
 
 ## Install
 
@@ -27,14 +28,15 @@ git clone --depth=1 https://github.com/psadowski0/omasetup.git \
   ~/.local/share/omasetup && ~/.local/share/omasetup/modules/unlock-themes/unlock-themes link
 ```
 
-Then run `unlock-themes enable`.
+Then run `unlock-themes enable`. The first `enable` asks for sudo once to
+center the field and add the small update hook.
 
 ## Use
 
 ```bash
-unlock-themes enable     # Adds the two unlock screens.
+unlock-themes enable     # Adds the centered screens and the update hook.
 unlock-themes status     # Shows what is installed and which screen is active.
-unlock-themes disable    # Removes the screens and restores the default if needed.
+unlock-themes disable    # Removes everything and restores the default if needed.
 ```
 
 Open Omarchy menu → **Appearance → Unlock** and choose **White No Logo** or
@@ -53,6 +55,13 @@ You can run `enable` and `disable` more than once. The module requires Omarchy
 Omarchy applies the same choice to its login screen, as it does for every
 unlock theme.
 
+The module adds one conditional line to Omarchy's Plymouth layout. Stock themes
+are unaffected because their logo is taller than one pixel. The module's two
+screens use a 1×1 transparent logo, which turns the condition on.
+
+Two small Pacman hooks keep the centering and restore the selected screen after
+an Omarchy update. They are removed by `disable`.
+
 ## Good to know
 
 - It does not change your desktop theme.
@@ -61,20 +70,27 @@ unlock theme.
   picker only lists themes with a desktop preview or backgrounds, and these
   screens have neither. The `omarchy theme list` command still lists every
   theme directory, including these two.
+- The password field is exactly centered. Stock themes keep their original
+  position.
+- The module changes two Omarchy layout files by one line each. `disable`
+  restores them byte-for-byte.
+- `pacman -Qkk omarchy-settings` reports modified Plymouth and SDDM files while
+  the module is on. That is expected, and `disable` restores the layout files.
+- The SDDM login screen is not patched. Omarchy still applies the selected
+  screen's logo to it, as it does for every unlock theme.
 - `disable` restores the default unlock screen when one of these screens is
-  active.
+  active, removes the hooks and saved data, and rebuilds the boot image.
 - It leaves stock themes and your own themes alone.
-- The preview images use Omarchy's own Plymouth layout.
+- The preview images use Omarchy's Plymouth layout with the same centering rule.
 
 ## Tested in the real world
 
 The module was tested on 7 November 2026 on real hardware with Omarchy 4.5.0-3.
-Both screens were applied, Omarchy identified each one as active, and `disable`
-restored the default screen and removed the files. The previews place the
-password field at the same coordinates as the original White and Vantablack
-previews. The machine was not rebooted, so the boot screen itself was not seen.
-
-The full evidence is in the [test log](docs/testing.md).
+A 44-check real-system test covered install, both screens, a simulated
+`omarchy-settings` upgrade through the Pacman hooks, status, and full removal.
+Every check passed. The [test log](docs/testing.md) lists each check. The module
+is left on with **Vantablack No Logo** active for the reboot check. The boot
+screen itself has not been seen yet, so a reboot is the final confirmation.
 
 ## Update
 
@@ -85,9 +101,8 @@ unlock-themes update
 ```
 
 If the screens are already installed, run `unlock-themes enable` after updating
-so the installed files use the new version. If one of the screens is active,
-choose it again under **Appearance → Unlock** so the new layout reaches
-Plymouth.
+so the helper, hooks, and screens use the new version. If one of the screens is
+active, `enable` refreshes it automatically.
 
 ## Remove
 
