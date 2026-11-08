@@ -20,10 +20,13 @@ theme_names=(white-no-logo vantablack-no-logo)
 marker=".omasetup-unlock-theme"
 
 system_helper="$script_dir/system.sh"
+build_hook_src="$script_dir/build-hook"
 helper_installed=/usr/local/lib/omasetup/unlock-themes/system.sh
 state_dir=/var/lib/omasetup/unlock-themes
-record_hook=/etc/pacman.d/hooks/80-omasetup-unlock-themes-record.hook
+build_hook=/etc/initcpio/install/omasetup-unlock-themes
+dropin=/etc/mkinitcpio.conf.d/99-omasetup-unlock-themes.conf
 restore_hook=/etc/pacman.d/hooks/85-omasetup-unlock-themes-restore.hook
+legacy_record_hook=/etc/pacman.d/hooks/80-omasetup-unlock-themes-record.hook
 layout_source=/usr/share/omarchy/default/plymouth/omarchy.script
 layout_installed=/usr/share/plymouth/themes/omarchy/omarchy.script
 anchor_line='  entry.y = logo.sprite.GetY() + logo.image.GetHeight() + 40;'
@@ -36,7 +39,7 @@ Usage: unlock-themes <command>
 
 Commands:
   enable    Add the two centered, logo-free unlock screens.
-  disable   Remove them, the update hook, and the layout change.
+  disable   Remove them, the boot-image hook, and the update hook.
   status    Show whether the screens are installed and which one is active.
   link      Put the unlock-themes command on your PATH.
   unlink    Remove that command.
@@ -111,8 +114,16 @@ require_layout() {
     echo "unlock-themes: The root helper is missing from $system_helper." >&2
     exit 1
   fi
+  if [ ! -f "$build_hook_src" ]; then
+    echo "unlock-themes: The boot-image hook is missing from $build_hook_src." >&2
+    exit 1
+  fi
   if ! grep -qF -- "$anchor_line" "$layout_source" 2>/dev/null; then
     echo "unlock-themes: Omarchy's Plymouth layout has changed, so the field cannot be centered. Please report this." >&2
+    exit 1
+  fi
+  if [ ! -d /etc/mkinitcpio.conf.d ]; then
+    echo "unlock-themes: This system does not support mkinitcpio drop-ins, so the field cannot be centered." >&2
     exit 1
   fi
   if ! command -v magick >/dev/null 2>&1; then
@@ -121,12 +132,13 @@ require_layout() {
   fi
 }
 
-layout_patched() {
+legacy_patch_present() {
   local file
 
   for file in "$layout_source" "$layout_installed"; do
-    grep -qF -- "$patch_token" "$file" 2>/dev/null || return 1
+    grep -qF -- "$patch_token" "$file" 2>/dev/null && return 0
   done
+  return 1
 }
 
 helper_present() {
@@ -134,7 +146,7 @@ helper_present() {
 }
 
 hooks_present() {
-  [ -f "$record_hook" ] && [ -f "$restore_hook" ]
+  [ -f "$build_hook" ] && [ -f "$dropin" ] && [ -f "$restore_hook" ]
 }
 
 state_present() {
@@ -142,11 +154,12 @@ state_present() {
 }
 
 root_present() {
-  helper_present || hooks_present || state_present
+  helper_present || hooks_present || state_present || [ -f "$legacy_record_hook" ]
 }
 
 is_fully_enabled() {
-  is_enabled && layout_patched && helper_present && hooks_present && state_present
+  is_enabled && helper_present && hooks_present && state_present &&
+    ! legacy_patch_present && [ ! -e "$legacy_record_hook" ]
 }
 
 install_theme() {
@@ -194,13 +207,13 @@ enable() {
   fi
 
   echo
-  echo "unlock-themes is adding the centered layout and update hook (sudo)..."
+  echo "unlock-themes is adding the boot-image hook and update hook (sudo)..."
   sudo "$system_helper" install "$themes_src"
   echo
 
   if is_our_theme "$active_before"; then
-    echo "The $(theme_label "$active_before") screen is active, so unlock-themes is refreshing it (sudo)..."
-    omarchy-plymouth-set-by-theme "$active_before"
+    echo "The $(theme_label "$active_before") screen is active, so unlock-themes is rebuilding the boot image (sudo)..."
+    sudo "$system_helper" rebuild
     echo
   fi
 
@@ -208,12 +221,13 @@ enable() {
   echo "Open Omarchy menu > Appearance > Unlock and choose a screen."
   echo "The field is exactly centered, and the lock icon stays to its left."
   echo "These screens do not appear under Appearance > Theme."
-  echo "The update hook keeps the centering and restores your screen after Omarchy updates."
+  echo "The centering exists only in the boot image, so Omarchy's files stay untouched."
+  echo "The update hook restores your screen after Omarchy updates."
   echo "To remove everything, run 'unlock-themes disable'."
 }
 
 disable() {
-  local active name present=0 installed=0 skipped=0 patched=0 root=0 rebuild=0
+  local active name present=0 installed=0 skipped=0 legacy=0 root=0 removed=0
 
   active=""
   if command -v omarchy-plymouth-current >/dev/null 2>&1; then
@@ -228,26 +242,26 @@ disable() {
       installed=1
     fi
   done
-  if layout_patched; then
-    patched=1
+  if legacy_patch_present; then
+    legacy=1
   fi
   if root_present; then
     root=1
   fi
 
-  if [ "$present" -eq 0 ] && [ "$patched" -eq 0 ] && [ "$root" -eq 0 ]; then
+  if [ "$present" -eq 0 ] && [ "$legacy" -eq 0 ] && [ "$root" -eq 0 ]; then
     echo "The logo-free unlock screens are not installed, so there is nothing to remove."
     return
   fi
 
-  if [ "$patched" -eq 1 ] || [ "$root" -eq 1 ]; then
+  if [ "$root" -eq 1 ] || [ "$legacy" -eq 1 ]; then
     if [ ! -f "$system_helper" ]; then
-      echo "unlock-themes: The root helper is missing from $system_helper, so the layout change cannot be removed." >&2
+      echo "unlock-themes: The root helper is missing from $system_helper, so the module cannot be removed." >&2
       exit 1
     fi
-    echo "unlock-themes is removing the centered layout and update hook (sudo)..."
+    echo "unlock-themes is removing the boot-image hook and update hook (sudo)..."
     sudo "$system_helper" uninstall
-    rebuild=1
+    removed=1
     echo
   fi
 
@@ -255,8 +269,8 @@ disable() {
     echo "The $(theme_label "$active") screen is active, so unlock-themes is restoring the default screen (sudo)..."
     omarchy-plymouth-reset
     echo
-  elif [ "$rebuild" -eq 1 ]; then
-    echo "unlock-themes is rebuilding the boot image without the layout change (sudo)..."
+  elif [ "$removed" -eq 1 ]; then
+    echo "unlock-themes is rebuilding the boot image without the centering (sudo)..."
     sudo "$system_helper" rebuild
     echo
   fi
@@ -275,7 +289,7 @@ disable() {
     echo
   fi
 
-  if [ "$installed" -ne 0 ] || [ "$root" -eq 1 ] || [ "$patched" -eq 1 ]; then
+  if [ "$installed" -ne 0 ] || [ "$root" -eq 1 ] || [ "$legacy" -eq 1 ]; then
     echo "unlock-themes is off."
   fi
 
@@ -314,17 +328,30 @@ print_status() {
     printf '  %-20s The current screen could not be identified.\n' "Unlock screen"
   fi
 
-  if layout_patched; then
-    printf '  %-20s The field is exactly centered.\n' "Field layout"
-  elif grep -qF -- "$anchor_line" "$layout_source" 2>/dev/null; then
-    printf '  %-20s The layout patch is not applied.\n' "Field layout"
+  if legacy_patch_present; then
+    printf '  %-20s The old on-disk layout change is still present. Run enable to migrate.\n' "Field layout"
+  elif ! state_present; then
+    printf '  %-20s The boot image uses Omarchy'"'"'s stock layout.\n' "Field layout"
   else
-    printf '  %-20s Omarchy changed its layout, so the patch cannot be applied.\n' "Field layout"
+    case "$(cat -- "$state_dir/last-build" 2>/dev/null || true)" in
+      centered*)
+        printf '  %-20s The last boot image centers the field.\n' "Field layout"
+        ;;
+      skipped*)
+        printf '  %-20s The last boot image kept Omarchy'"'"'s layout; see the build log.\n' "Field layout"
+        ;;
+      stock*)
+        printf '  %-20s The last boot image used Omarchy'"'"'s stock layout.\n' "Field layout"
+        ;;
+      *)
+        printf '  %-20s The boot image has not been rebuilt yet.\n' "Field layout"
+        ;;
+    esac
   fi
 
   if helper_present && hooks_present && state_present; then
     printf '  %-20s It is installed and restores your screen after updates.\n' "Update hook"
-  elif helper_present || hooks_present || state_present; then
+  elif root_present; then
     printf '  %-20s It is only partly installed. Run enable to repair it.\n' "Update hook"
   else
     printf '  %-20s It is not installed.\n' "Update hook"

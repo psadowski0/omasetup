@@ -1,0 +1,131 @@
+#!/bin/bash
+# mkinitcpio install hook for unlock-themes. Installed at
+# /etc/initcpio/install/omasetup-unlock-themes and run after the plymouth hook.
+#
+# It writes a centered copy of the Plymouth layout into the initramfs only when
+# one of the module's two screens is selected. The files on disk stay stock, and
+# every failure leaves the stock layout in place. It never fails the build.
+
+_omasetup_unlock_themes_note() {
+  local value=$1 tmp
+
+  printf -v value '%s' "$value"
+  tmp=$(mktemp -- "$state_dir/.last-build.XXXXXX" 2>/dev/null) || return 0
+  printf '%s\n' "$value" >"$tmp" 2>/dev/null || {
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 0
+  }
+  chown 0:0 -- "$tmp" 2>/dev/null || true
+  chmod 0644 -- "$tmp" 2>/dev/null || true
+  mv -fT -- "$tmp" "$state_dir/last-build" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null || true
+  return 0
+}
+
+build() {
+  local state_dir=/var/lib/omasetup/unlock-themes
+  local theme_name theme_dir theme_script build_dir name candidate
+  local anchor patch tmp count
+
+  # The official Omarchy Unlock picker always applies the omarchy theme.
+  theme_name=$(plymouth-set-default-theme 2>/dev/null) || return 0
+  [ "$theme_name" = "omarchy" ] || return 0
+
+  [ -n "${BUILDROOT:-}" ] || return 0
+  theme_dir=/usr/share/plymouth/themes/omarchy
+  build_dir=$BUILDROOT$theme_dir
+  theme_script=$build_dir/omarchy.script
+
+  [ -d "$build_dir" ] || return 0
+  [ -f "$theme_script" ] || return 0
+
+  # The saved data is root-owned and lives outside the initramfs.
+  [ -d "$state_dir" ] && [ ! -L "$state_dir" ] || return 0
+  [ "$(stat -c %u -- "$state_dir" 2>/dev/null)" = "0" ] || return 0
+
+  # Identify the selected screen by its installed logo.
+  name=
+  for candidate in white-no-logo vantablack-no-logo; do
+    if [ -f "$state_dir/$candidate/logo.png" ] &&
+      [ ! -L "$state_dir/$candidate/logo.png" ] &&
+      [ "$(stat -c %u -- "$state_dir/$candidate/logo.png" 2>/dev/null)" = "0" ] &&
+      [ -f "$theme_dir/logo.png" ] &&
+      [ ! -L "$theme_dir/logo.png" ] &&
+      cmp -s -- "$theme_dir/logo.png" "$state_dir/$candidate/logo.png"; then
+      name=$candidate
+      break
+    fi
+  done
+
+  # Remember the screen for the post-upgrade restore hook.
+  if [ -n "$name" ]; then
+    if tmp=$(mktemp -- "$state_dir/.active.XXXXXX" 2>/dev/null); then
+      if printf '%s\n' "$name" >"$tmp"; then
+        chown 0:0 -- "$tmp" 2>/dev/null || true
+        chmod 0644 -- "$tmp" 2>/dev/null || true
+        if ! mv -fT -- "$tmp" "$state_dir/active" 2>/dev/null; then
+          rm -f -- "$tmp" 2>/dev/null || true
+        fi
+      else
+        rm -f -- "$tmp" 2>/dev/null || true
+      fi
+    else
+      printf 'unlock-themes: The selected screen could not be saved for updates.\n' >&2
+    fi
+  else
+    rm -f -- "$state_dir/active" 2>/dev/null || true
+    _omasetup_unlock_themes_note "stock"
+    return 0
+  fi
+
+  anchor='  entry.y = logo.sprite.GetY() + logo.image.GetHeight() + 40;'
+  patch='  if (logo.image.GetHeight() == 1) entry.y = global.layout_height / 2 - entry.image.GetHeight() / 2;'
+
+  # A v0.2.2 install may still carry the line on disk. Leave that copy alone.
+  if grep -qF -- "$patch" "$theme_script" 2>/dev/null; then
+    _omasetup_unlock_themes_note "centered $name"
+    return 0
+  fi
+
+  if [ "$(grep -cF -- "$anchor" "$theme_script" 2>/dev/null || true)" != "1" ]; then
+    printf 'unlock-themes: Omarchy changed its Plymouth layout; centering was skipped.\n' >&2
+    _omasetup_unlock_themes_note "skipped $name"
+    return 0
+  fi
+
+  if ! tmp=$(mktemp -- "$build_dir/omarchy.script.XXXXXX" 2>/dev/null); then
+    printf 'unlock-themes: A temporary layout file could not be created; centering was skipped.\n' >&2
+    _omasetup_unlock_themes_note "skipped $name"
+    return 0
+  fi
+
+  if ! awk -v anchor="$anchor" -v line="$patch" '
+    { print }
+    $0 == anchor { print line }
+  ' "$theme_script" >"$tmp"; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    printf 'unlock-themes: The centered layout could not be written; centering was skipped.\n' >&2
+    _omasetup_unlock_themes_note "skipped $name"
+    return 0
+  fi
+
+  count=$(grep -cF -- "$patch" "$tmp" 2>/dev/null || true)
+  if [ "$count" != "1" ] ||
+    [ "$(grep -cF -- "$anchor" "$tmp" 2>/dev/null || true)" != "1" ]; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    printf 'unlock-themes: The centered layout failed validation; centering was skipped.\n' >&2
+    _omasetup_unlock_themes_note "skipped $name"
+    return 0
+  fi
+
+  if ! chown 0:0 -- "$tmp" 2>/dev/null ||
+    ! chmod 0644 -- "$tmp" 2>/dev/null ||
+    ! mv -fT -- "$tmp" "$theme_script" 2>/dev/null; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    printf 'unlock-themes: The centered layout could not be installed; centering was skipped.\n' >&2
+    _omasetup_unlock_themes_note "skipped $name"
+    return 0
+  fi
+
+  _omasetup_unlock_themes_note "centered $name"
+  return 0
+}

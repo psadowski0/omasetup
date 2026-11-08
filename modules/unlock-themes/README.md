@@ -28,8 +28,8 @@ git clone --depth=1 https://github.com/psadowski0/omasetup.git \
   ~/.local/share/omasetup && ~/.local/share/omasetup/modules/unlock-themes/unlock-themes link
 ```
 
-Then run `unlock-themes enable`. The first `enable` asks for sudo once to
-center the field and add the small update hook.
+Then run `unlock-themes enable`. The first `enable` asks for sudo once to add a
+small boot-image hook. It does not change Omarchy's own files.
 
 ## Use
 
@@ -55,12 +55,18 @@ You can run `enable` and `disable` more than once. The module requires Omarchy
 Omarchy applies the same choice to its login screen, as it does for every
 unlock theme.
 
-The module adds one conditional line to Omarchy's Plymouth layout. Stock themes
-are unaffected because their logo is taller than one pixel. The module's two
-screens use a 1×1 transparent logo, which turns the condition on.
+The centering is written into the boot image when the boot image is built. The
+module adds a small mkinitcpio hook and a drop-in, and the hook adds one
+conditional line to the copy of Omarchy's Plymouth layout inside the boot image
+only. The files on disk stay exactly as Omarchy ships them.
 
-Two small Pacman hooks keep the centering and restore the selected screen after
-an Omarchy update. They are removed by `disable`.
+The line runs only when the logo is one pixel tall, which is true for these two
+screens and false for every stock theme. Stock screens keep their original
+layout.
+
+One small Pacman hook restores the selected screen's logo and colors after an
+`omarchy-settings` update. It does not force a rebuild. The next normal boot
+image build centers the field again.
 
 ## Good to know
 
@@ -72,25 +78,31 @@ an Omarchy update. They are removed by `disable`.
   theme directory, including these two.
 - The password field is exactly centered. Stock themes keep their original
   position.
-- The module changes two Omarchy layout files by one line each. `disable`
-  restores them byte-for-byte.
-- `pacman -Qkk omarchy-settings` reports modified Plymouth and SDDM files while
-  the module is on. That is expected, and `disable` restores the layout files.
+- No Omarchy or Plymouth file is patched in normal use. The module only adds
+  new files. Migrating from v0.2.2 removes its old one-line change from the
+  packaged layout, which can leave a modification-time warning until the next
+  `omarchy-settings` update.
+- `pacman -Qkk omarchy-settings` reports the installed theme assets while a
+  screen is active, because Omarchy applies the selected colors and logo for
+  every unlock theme. The packaged source layout has no checksum mismatch.
 - The SDDM login screen is not patched. Omarchy still applies the selected
   screen's logo to it, as it does for every unlock theme.
-- `disable` restores the default unlock screen when one of these screens is
-  active, removes the hooks and saved data, and rebuilds the boot image.
+- `unlock-themes status` shows whether the last boot image was centered.
+- `disable` restores the default screen when one of these screens is active,
+  removes every added file, and rebuilds the boot image once.
 - It leaves stock themes and your own themes alone.
 - The preview images use Omarchy's Plymouth layout with the same centering rule.
 
 ## Tested in the real world
 
-The module was tested on 7 November 2026 on real hardware with Omarchy 4.5.0-3.
-A 44-check real-system test covered install, both screens, a simulated
-`omarchy-settings` upgrade through the Pacman hooks, status, and full removal.
-Every check passed. The [test log](docs/testing.md) lists each check. The module
-is left on with **Vantablack No Logo** active for the reboot check. The boot
-screen itself has not been seen yet, so a reboot is the final confirmation.
+The module was tested on 8 November 2026 on real hardware with Omarchy 4.5.0-3.
+A 63-check real-system test migrated the live v0.2.2 install, exercised both
+screens, simulated an `omarchy-settings` upgrade, removed everything, and
+installed it again. It also read the centered layout back out of the real boot
+image. Every check passed. The [test log](docs/testing.md) lists each check and
+the sandbox results. The module is left on with **Vantablack No Logo** active
+for the reboot check. The boot screen itself has not been seen yet, so a reboot
+is the final confirmation.
 
 ## Update
 
@@ -102,7 +114,7 @@ unlock-themes update
 
 If the screens are already installed, run `unlock-themes enable` after updating
 so the helper, hooks, and screens use the new version. If one of the screens is
-active, `enable` refreshes it automatically.
+active, `enable` rebuilds the boot image automatically.
 
 ## Remove
 
