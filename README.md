@@ -16,9 +16,9 @@ Omasetup will let you:
 
 ## What works today?
 
-Two independent modules work today: **auto-hibernate** and **unlock-themes**.
-They run on their own and do not need the Omasetup app. Omasetup will call the
-same commands when the app is ready.
+Three independent modules work today: **auto-hibernate**, **unlock-themes**, and
+**natural-scroll**. They run on their own and do not need the Omasetup app.
+Omasetup will call the same commands when the app is ready.
 
 ## Modules
 
@@ -26,6 +26,7 @@ same commands when the app is ready.
 |---|---|---|
 | [auto-hibernate](modules/auto-hibernate/README.md) | Available | It suspends on battery, then hibernates before the battery dies. It never hibernates while the charger stays connected. |
 | [unlock-themes](modules/unlock-themes/README.md) | Available | It adds two logo-free unlock screens with an exactly centered password field, based on White and Vantablack. |
+| [natural-scroll](modules/natural-scroll/README.md) | Available | It makes the touchpad scroll naturally, the way a phone does, and leaves the mouse wheel alone. |
 
 ## Start here
 

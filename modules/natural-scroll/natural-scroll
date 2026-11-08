@@ -1,0 +1,297 @@
+#!/bin/bash
+# Summary: Make the touchpad scroll naturally, the way a phone does.
+set -euo pipefail
+
+# Resolve symlinks so the command works through ~/.local/bin/natural-scroll.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+repo_dir="$(cd -P -- "$script_dir/../.." && pwd)"
+
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+
+toggle_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/toggles/hypr"
+toggle_file="$toggle_dir/natural-scroll.lua"
+marker='-- omasetup: natural-scroll'
+
+usage() {
+  local code="${1:-2}"
+  cat >&2 <<'EOF'
+Usage: natural-scroll <command>
+
+Commands:
+  enable    Make the touchpad scroll naturally.
+  disable   Return the touchpad to the default direction.
+  status    Show whether the touchpad scrolls naturally.
+  link      Put the natural-scroll command on your PATH.
+  unlink    Remove that command.
+  update    Update this checkout.
+  version   Show the installed version.
+
+Examples:
+  natural-scroll status
+  natural-scroll enable
+  natural-scroll disable
+EOF
+  exit "$code"
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "natural-scroll: Run as your normal user, not as root." >&2
+  exit 1
+fi
+
+hyprland_running() {
+  command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1
+}
+
+reload_hyprland() {
+  hyprland_running || return 1
+  hyprctl reload >/dev/null 2>&1 || return 1
+}
+
+runtime_scroll_direction() {
+  hyprctl getoption input:touchpad:natural_scroll 2>/dev/null |
+    sed -n 's/^bool: //p' | head -n 1
+}
+
+is_installed() {
+  [ -f "$toggle_file" ] && [ ! -L "$toggle_file" ] &&
+    [ "$(head -n 1 -- "$toggle_file" 2>/dev/null || true)" = "$marker" ]
+}
+
+is_runtime_natural() {
+  [ "$(runtime_scroll_direction)" = "true" ]
+}
+
+is_enabled() {
+  is_installed || return 1
+  hyprland_running || return 0
+  is_runtime_natural
+}
+
+write_toggle() {
+  local tmp
+
+  mkdir -p -- "$toggle_dir"
+  tmp=$(mktemp -- "$toggle_dir/.natural-scroll.XXXXXX") ||
+    {
+      echo "natural-scroll: The toggle file could not be created in $toggle_dir." >&2
+      return 1
+    }
+
+  if ! cat > "$tmp" <<'EOF'
+-- omasetup: natural-scroll
+-- Make the touchpad scroll naturally. The mouse wheel keeps its direction.
+hl.config({
+  input = {
+    touchpad = {
+      natural_scroll = true,
+    },
+  },
+})
+EOF
+  then
+    rm -f -- "$tmp"
+    echo "natural-scroll: The toggle file could not be written." >&2
+    return 1
+  fi
+
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$toggle_file" || {
+    rm -f -- "$tmp"
+    echo "natural-scroll: The toggle file could not be installed." >&2
+    return 1
+  }
+}
+
+remove_toggle() {
+  rm -f -- "$toggle_file"
+}
+
+enable() {
+  if [ ! -f "$OMARCHY_PATH/default/hypr/toggles.lua" ]; then
+    echo "natural-scroll: This does not look like an Omarchy system, so there is nothing to configure." >&2
+    exit 1
+  fi
+
+  write_toggle
+
+  if reload_hyprland; then
+    if ! is_runtime_natural; then
+      remove_toggle
+      reload_hyprland || true
+      echo "natural-scroll: Hyprland did not pick up natural scrolling, so the change was undone." >&2
+      exit 1
+    fi
+    echo "Natural scrolling is on for the touchpad."
+  else
+    echo "Natural scrolling is on for the touchpad at the next login."
+  fi
+
+  echo "The mouse wheel keeps its direction."
+  echo "  To turn it off, run 'natural-scroll disable'."
+}
+
+disable() {
+  if [ -L "$toggle_file" ]; then
+    echo "natural-scroll: $toggle_file is a symlink, so natural-scroll will not remove it." >&2
+    exit 1
+  fi
+
+  if [ ! -e "$toggle_file" ]; then
+    echo "Natural scrolling is already off for the touchpad."
+    return 0
+  fi
+
+  if ! is_installed; then
+    echo "natural-scroll: $toggle_file was not written by this module, so natural-scroll will not remove it." >&2
+    exit 1
+  fi
+
+  remove_toggle
+
+  if reload_hyprland; then
+    if is_runtime_natural; then
+      echo "natural-scroll: Hyprland still reports natural scrolling, so the change may need a reload." >&2
+      exit 1
+    fi
+    echo "Natural scrolling is off for the touchpad."
+  else
+    echo "Natural scrolling is off for the touchpad at the next login."
+  fi
+}
+
+print_status() {
+  local installed runtime
+
+  installed=no
+  is_installed && installed=yes
+
+  echo "natural-scroll"
+  echo
+
+  if [ "$installed" = "yes" ]; then
+    echo "  Touchpad         Natural scrolling is on."
+  else
+    echo "  Touchpad         Natural scrolling is off."
+  fi
+
+  echo "  Mouse wheel      It keeps the traditional direction."
+
+  if hyprland_running; then
+    runtime="$(runtime_scroll_direction)"
+    if [ "$runtime" = "true" ]; then
+      echo "  Running now      Hyprland is using natural scrolling."
+    elif [ "$runtime" = "false" ]; then
+      echo "  Running now      Hyprland is using the traditional direction."
+    else
+      echo "  Running now      Hyprland did not report the setting."
+    fi
+  else
+    echo "  Running now      Hyprland is not running, so the setting applies at the next login."
+  fi
+
+  if is_enabled; then
+    echo "  State            The module is on."
+  else
+    echo "  State            The module is off."
+  fi
+}
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'natural-scroll %s\n' \
+      "$(git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed.")"
+  else
+    echo "natural-scroll unknown: this is not a git checkout."
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "natural-scroll: This is not a git checkout. Download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  version
+}
+
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/natural-scroll"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "natural-scroll: $link already exists and is not a symlink, so natural-scroll will not overwrite it." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$script_dir/natural-scroll" ]; then
+    echo "natural-scroll: $link points to another checkout, so natural-scroll will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$script_dir/natural-scroll" "$link"
+  echo "Linked $link to $script_dir/natural-scroll."
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run 'natural-scroll enable' to turn it on." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $script_dir/natural-scroll directly." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/natural-scroll"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$script_dir/natural-scroll" ]; then
+    rm -f -- "$link"
+    echo "Removed $link."
+  elif [ -e "$link" ]; then
+    echo "natural-scroll: $link does not point at this checkout, so natural-scroll will not remove it." >&2
+    exit 1
+  else
+    echo "There is no link at $link."
+  fi
+}
+
+case "${1:-}" in
+  enable)
+    enable
+    ;;
+  disable)
+    disable
+    ;;
+  status)
+    if [ "${2:-}" = "--quiet" ]; then
+      is_enabled
+    else
+      print_status
+    fi
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
+    ;;
+  update)
+    update
+    ;;
+  version | --version)
+    version
+    ;;
+  -h | --help | help)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
