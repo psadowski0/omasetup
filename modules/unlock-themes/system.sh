@@ -140,7 +140,7 @@ write_build_hook() {
   fi
 
   install -d -m 0755 /etc/initcpio/install
-  install -o 0 -g 0 -m 0644 -- "$source" "$build_hook"
+  install -o 0 -g 0 -m 0755 -- "$source" "$build_hook"
 }
 
 write_dropin() {
@@ -259,7 +259,7 @@ apply_theme() {
 
   for asset in bullet.png entry.png lock.png progress_bar.png; do
     [ -f "$theme_dir/$asset" ] || continue
-    if ! magick "$theme_dir/$asset" -channel RGB +level-colors "#$fg","#$fg" "$theme_dir/$asset"; then
+    if ! magick "$theme_dir/$asset" -channel RGB +level-colors "#$fg,#$fg" "$theme_dir/$asset"; then
       echo "unlock-themes: $asset could not be recolored." >&2
       return 1
     fi
