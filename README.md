@@ -16,10 +16,10 @@ Omasetup will let you:
 
 ## What works today?
 
-Four independent modules work today: **auto-hibernate**, **unlock-themes**,
-**natural-scroll**, and **keyboard-pl-dh**. They run on their own and do not
-need the Omasetup app. Omasetup will call the same commands when the app is
-ready.
+Five independent modules work today: **auto-hibernate**, **unlock-themes**,
+**natural-scroll**, **keyboard-pl-dh**, and **ui-scale**. They run on their own
+and do not need the Omasetup app. Omasetup will call the same commands when the
+app is ready.
 
 ## Modules
 
@@ -29,6 +29,7 @@ ready.
 | [unlock-themes](modules/unlock-themes/README.md) | Available | It adds two logo-free unlock screens with an exactly centered password field, based on White and Vantablack. |
 | [natural-scroll](modules/natural-scroll/README.md) | Available | It makes the touchpad scroll naturally, the way a phone does, and leaves the mouse wheel alone. |
 | [keyboard-pl-dh](modules/keyboard-pl-dh/README.md) | Available | It puts Polish Colemak-DH on the desktop and at the boot passphrase prompt. The desktop layout is switchable and labelled on the bar; the boot layout stays put. |
+| [ui-scale](modules/ui-scale/README.md) | Available | It makes the desktop bigger: a 1.33 display scale, a larger shell and bar, a 14 pt terminal, and a larger text console that is also baked into the boot image. |
 
 ## Start here
 

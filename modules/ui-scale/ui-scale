@@ -1,0 +1,589 @@
+#!/bin/bash
+# Summary: Scale the desktop, the shell, the terminal, and the text console to a larger size.
+set -euo pipefail
+
+# Resolve symlinks so the command works through ~/.local/bin/ui-scale.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+repo_dir="$(cd -P -- "$script_dir/../.." && pwd)"
+
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
+state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+state_dir="$state_home/omasetup/ui-scale"
+root_state_dir="${UI_SCALE_ROOT_STATE:-/var/lib/omasetup/ui-scale}"
+toggle_dir="$state_home/omarchy/toggles/hypr"
+toggle_file="$toggle_dir/ui-scale.lua"
+shell_file="$config_dir/omarchy/shell.toml"
+foot_file="$config_dir/foot/foot.ini"
+helper="$script_dir/system.sh"
+
+# What this module installs. The display scale is a per-monitor value, so the
+# built-in panel is named explicitly rather than using "auto".
+output="${UI_SCALE_OUTPUT:-eDP-1}"
+scale=1.33
+base_size=14
+term_pt=14
+console_font=latarcyrheb-sun32
+
+marker='-- omasetup: ui-scale'
+
+usage() {
+  local code="${1:-2}"
+  cat >&2 <<'EOF'
+Usage: ui-scale <command>
+
+Commands:
+  enable    Make the desktop, the shell, the terminal, and the text console
+            larger. The text console is part of the boot image, so this asks
+            for sudo and rebuilds the image.
+  disable   Return all four to the Omarchy defaults.
+  verify    Check the running values and the boot image. Uses sudo.
+  status    Show the value of each element and whether the module is on.
+  link      Put the ui-scale command on your PATH.
+  unlink    Remove that command.
+  update    Update this checkout.
+  version   Show the installed version.
+
+Examples:
+  ui-scale status
+  ui-scale enable
+  ui-scale verify
+  ui-scale disable
+EOF
+  exit "$code"
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "ui-scale: Run as your normal user, not as root." >&2
+  exit 1
+fi
+
+hyprland_running() {
+  command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1
+}
+
+reload_hyprland() {
+  hyprland_running || return 1
+  hyprctl reload >/dev/null 2>&1 || return 1
+}
+
+# The running scale of the module's output, from the text form of
+# "hyprctl monitors". Hyprland reports 1.33 as 1.3333334, so callers must
+# compare it as a number, never as a string.
+runtime_scale() {
+  hyprctl monitors 2>/dev/null | awk -v out="$output" '
+    $1 == "Monitor" && $2 == out { found = 1; next }
+    $1 == "Monitor" { found = 0 }
+    found && $1 == "scale:" { print $2; exit }
+  '
+}
+
+scale_matches() {
+  local runtime
+  runtime="$(runtime_scale)"
+  [ -n "$runtime" ] || return 1
+  awk -v a="$runtime" -v b="$scale" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d < 0.01) }'
+}
+
+toggle_installed() {
+  [ -f "$toggle_file" ] && [ ! -L "$toggle_file" ] &&
+    [ "$(head -n 1 -- "$toggle_file" 2>/dev/null || true)" = "$marker" ]
+}
+
+write_toggle() {
+  local tmp
+
+  mkdir -p -- "$toggle_dir"
+  tmp=$(mktemp -- "$toggle_dir/.ui-scale.XXXXXX") || {
+    echo "ui-scale: The monitor override could not be created in $toggle_dir." >&2
+    return 1
+  }
+
+  if ! cat >"$tmp" <<EOF
+$marker
+-- Scale the built-in panel. Omarchy loads this directory after your own
+-- Hyprland config on every reload, so the value survives
+-- "omarchy refresh hyprland" and package updates.
+hl.monitor({ output = "$output", mode = "preferred", position = "auto", scale = $scale })
+EOF
+  then
+    rm -f -- "$tmp"
+    echo "ui-scale: The monitor override could not be written." >&2
+    return 1
+  fi
+
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$toggle_file" || {
+    rm -f -- "$tmp"
+    echo "ui-scale: The monitor override could not be installed." >&2
+    return 1
+  }
+}
+
+remove_toggle() {
+  rm -f -- "$toggle_file"
+}
+
+# ---- shell base size, the rem root for the bar, menus, and panels ----
+
+shell_base_size() {
+  [ -f "$shell_file" ] || return 1
+  awk '
+    /^[[:space:]]*\[/ { in_font = ($0 ~ /^[[:space:]]*\[font\]([[:space:]]|$)/); next }
+    in_font && /^[[:space:]]*base-size[[:space:]]*=/ {
+      v = $0
+      sub(/^[^=]*=[[:space:]]*/, "", v)
+      sub(/[[:space:]]*(#.*)?$/, "", v)
+      print v
+      exit
+    }
+  ' "$shell_file"
+}
+
+shell_size_matches() {
+  [ "$(shell_base_size 2>/dev/null || true)" = "$base_size" ]
+}
+
+set_shell_base_size() {
+  local tmp
+
+  mkdir -p -- "$(dirname -- "$shell_file")"
+
+  if [ ! -f "$shell_file" ]; then
+    cat >"$shell_file" <<EOF
+# Written by ui-scale. The module manages [font] base-size only; other
+# settings can be added here and are left alone.
+[font]
+base-size = $base_size
+EOF
+    echo "The shell uses $base_size px as its base size."
+    return 0
+  fi
+
+  tmp=$(mktemp) || return 1
+  awk -v val="$base_size" '
+    function emit_base() { print "base-size = " val; done = 1 }
+    /^[[:space:]]*\[/ {
+      if (in_font && !done) emit_base()
+      in_font = ($0 ~ /^[[:space:]]*\[font\]([[:space:]]|$)/)
+      print
+      next
+    }
+    in_font && /^[[:space:]]*base-size[[:space:]]*=/ {
+      if (!done) emit_base()
+      next
+    }
+    { print }
+    END {
+      if (in_font && !done) emit_base()
+      if (!done) {
+        if (NR > 0) print ""
+        print "[font]"
+        emit_base()
+      }
+    }
+  ' "$shell_file" >"$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$shell_file"
+  echo "The shell uses $base_size px as its base size."
+}
+
+clear_shell_base_size() {
+  local tmp
+
+  [ -f "$shell_file" ] || return 0
+
+  tmp=$(mktemp) || return 1
+  awk '
+    /^[[:space:]]*\[/ { in_font = ($0 ~ /^[[:space:]]*\[font\]([[:space:]]|$)/) }
+    in_font && /^[[:space:]]*base-size[[:space:]]*=/ { next }
+    { print }
+  ' "$shell_file" >"$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$shell_file"
+
+  # Remove the file when only comments and empty section headers are left.
+  if [ -z "$(grep -vE '^[[:space:]]*(#|$|\[[^]]*\][[:space:]]*$)' "$shell_file" 2>/dev/null || true)" ]; then
+    rm -f -- "$shell_file"
+    rmdir -- "$(dirname -- "$shell_file")" 2>/dev/null || true
+  fi
+}
+
+# ---- terminal font size ----
+
+foot_size() {
+  [ -f "$foot_file" ] || return 1
+  sed -n 's/^font=.*:size=\([0-9.]*\).*/\1/p' "$foot_file" | head -n 1
+}
+
+foot_matches() {
+  [ "$(foot_size 2>/dev/null || true)" = "$term_pt" ]
+}
+
+# Set only the size in the font line, so the family and any other attributes
+# stay as they are. Foot has no config reload, so this reaches new windows.
+set_foot_size() {
+  local tmp
+
+  if [ ! -f "$foot_file" ]; then
+    echo "ui-scale: There is no foot configuration at $foot_file, so the terminal was not changed." >&2
+    return 0
+  fi
+
+  if ! grep -qE '^font=' "$foot_file"; then
+    echo "ui-scale: $foot_file has no font line, so the terminal was not changed." >&2
+    return 0
+  fi
+
+  mkdir -p -- "$state_dir"
+  if [ ! -f "$state_dir/foot-font.before" ]; then
+    sed -n '/^font=/p' "$foot_file" | head -n 1 >"$state_dir/foot-font.before"
+    chmod 0644 -- "$state_dir/foot-font.before"
+  fi
+
+  tmp=$(mktemp) || return 1
+  if grep -qE '^font=.*:size=[0-9.]+' "$foot_file"; then
+    sed -E "s/^(font=.*):size=[0-9.]+/\1:size=$term_pt/" "$foot_file" >"$tmp"
+  else
+    sed -E "s/^(font=.*)$/\1:size=$term_pt/" "$foot_file" >"$tmp"
+  fi
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$foot_file"
+  echo "The terminal uses $term_pt pt in new windows."
+}
+
+restore_foot_size() {
+  local saved tmp
+
+  saved="$state_dir/foot-font.before"
+  [ -f "$saved" ] || return 0
+  [ -f "$foot_file" ] || return 0
+
+  tmp=$(mktemp) || return 1
+  awk -v line="$(cat "$saved")" '
+    /^font=/ { if (!done) { print line; done = 1 } ; next }
+    { print }
+    END { if (!done) print line }
+  ' "$foot_file" >"$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$foot_file"
+  rm -f -- "$saved"
+  echo "The terminal is back to its previous size."
+}
+
+# ---- text console, applied by the root helper ----
+
+console_applied() {
+  [ -r "$root_state_dir/active" ] &&
+    [ "$(cat "$root_state_dir/active" 2>/dev/null || true)" = "$console_font" ]
+}
+
+run_helper() {
+  local action=$1
+  if [ ! -f "$helper" ]; then
+    echo "ui-scale: The root helper is missing from $script_dir." >&2
+    return 1
+  fi
+  sudo "$helper" "$action"
+}
+
+# ---- commands ----
+
+enable() {
+  local failed=0
+
+  if [ ! -f "$OMARCHY_PATH/default/hypr/toggles.lua" ]; then
+    echo "ui-scale: This does not look like an Omarchy system, so there is nothing to configure." >&2
+    exit 1
+  fi
+
+  write_toggle
+
+  if reload_hyprland; then
+    if scale_matches; then
+      echo "The desktop uses scale $scale on $output."
+    else
+      remove_toggle
+      reload_hyprland || true
+      echo "ui-scale: Hyprland did not pick up the new scale, so the change was undone." >&2
+      exit 1
+    fi
+  else
+    echo "The desktop uses scale $scale on $output at the next login."
+  fi
+
+  set_shell_base_size
+  echo "  The bar, menus, panels, and notifications use it."
+
+  set_foot_size
+
+  if console_applied; then
+    echo "The text console already uses $console_font."
+  elif run_helper install; then
+    echo "The text console uses $console_font, and so does the boot image."
+  else
+    echo "ui-scale: The text console was not changed." >&2
+    echo "ui-scale: Run 'ui-scale enable' again in a terminal that can use sudo." >&2
+    failed=1
+  fi
+
+  echo
+  echo "  New terminal windows use the new size; reopen them to see it."
+  echo "  To see the state, run 'ui-scale status'."
+  echo "  To undo everything, run 'ui-scale disable'."
+
+  return "$failed"
+}
+
+disable() {
+  local failed=0
+
+  if [ -L "$toggle_file" ]; then
+    echo "ui-scale: $toggle_file is a symlink, so ui-scale will not remove it." >&2
+    exit 1
+  fi
+
+  if [ -e "$toggle_file" ] && ! toggle_installed; then
+    echo "ui-scale: $toggle_file was not written by this module, so ui-scale will not remove it." >&2
+    exit 1
+  fi
+
+  if [ -e "$toggle_file" ]; then
+    remove_toggle
+    if reload_hyprland; then
+      if scale_matches; then
+        echo "ui-scale: The running scale is still $scale. Check your monitor config." >&2
+      else
+        echo "The desktop is back to the configured scale on $output."
+      fi
+    else
+      echo "The desktop is back to the configured scale at the next login."
+    fi
+  else
+    echo "The desktop already uses the configured scale."
+  fi
+
+  clear_shell_base_size
+  echo "The shell is back to its theme base size."
+
+  restore_foot_size || failed=1
+
+  if [ -f "$root_state_dir/active" ]; then
+    if run_helper uninstall; then
+      echo "The text console and the boot image are back to their previous font."
+    else
+      echo "ui-scale: The text console was not restored." >&2
+      failed=1
+    fi
+  else
+    echo "The text console already uses its previous font."
+  fi
+
+  echo
+  echo "  Reopen terminal windows to see the previous size."
+
+  return "$failed"
+}
+
+print_status() {
+  local installed state
+
+  installed=no
+  toggle_installed && installed=yes
+
+  echo "ui-scale"
+  echo
+
+  if hyprland_running; then
+    if scale_matches; then
+      echo "  Desktop          $output is running at scale $scale."
+    else
+      echo "  Desktop          $output is running at scale $(runtime_scale || echo unknown), not $scale."
+    fi
+  else
+    echo "  Desktop          Hyprland is not running; the scale applies at the next login."
+  fi
+
+  if shell_size_matches; then
+    echo "  Shell            The base size is $base_size px."
+  else
+    echo "  Shell            The base size is $(shell_base_size 2>/dev/null || echo unset), not $base_size."
+  fi
+
+  if [ -f "$foot_file" ]; then
+    if foot_matches; then
+      echo "  Terminal         foot uses $term_pt pt."
+    else
+      echo "  Terminal         foot uses $(foot_size 2>/dev/null || echo unknown) pt, not $term_pt."
+    fi
+  else
+    echo "  Terminal         There is no foot configuration."
+  fi
+
+  if console_applied; then
+    echo "  Text console     $console_font, also in the boot image."
+  else
+    echo "  Text console     Not set by this module."
+  fi
+
+  if [ "$installed" = "yes" ] && console_applied; then
+    state="The module is on."
+  elif [ "$installed" = "yes" ]; then
+    state="Partly on; the text console is not set."
+  else
+    state="The module is off."
+  fi
+  echo "  State            $state"
+}
+
+verify() {
+  local failed=0
+
+  if hyprland_running; then
+    if scale_matches; then
+      echo "ui-scale: Hyprland reports scale $scale on $output."
+    else
+      echo "ui-scale: Hyprland reports scale $(runtime_scale || echo unknown) on $output." >&2
+      failed=1
+    fi
+  fi
+
+  if shell_size_matches; then
+    echo "ui-scale: The shell base size is $base_size px."
+  else
+    echo "ui-scale: The shell base size is not $base_size px." >&2
+    failed=1
+  fi
+
+  if foot_matches; then
+    echo "ui-scale: The terminal font is $term_pt pt."
+  else
+    echo "ui-scale: The terminal font is not $term_pt pt." >&2
+    failed=1
+  fi
+
+  if [ -f "$helper" ]; then
+    if sudo "$helper" verify; then
+      :
+    else
+      failed=1
+    fi
+  else
+    echo "ui-scale: The root helper is missing from $script_dir." >&2
+    failed=1
+  fi
+
+  return "$failed"
+}
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'ui-scale %s\n' \
+      "$(git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed.")"
+  else
+    echo "ui-scale unknown: this is not a git checkout."
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "ui-scale: This is not a git checkout. Download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  version
+}
+
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/ui-scale"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "ui-scale: $link already exists and is not a symlink, so ui-scale will not overwrite it." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$script_dir/ui-scale" ]; then
+    echo "ui-scale: $link points to another checkout, so ui-scale will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$script_dir/ui-scale" "$link"
+  echo "Linked $link to $script_dir/ui-scale."
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run 'ui-scale enable' to turn it on." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $script_dir/ui-scale directly." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/ui-scale"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$script_dir/ui-scale" ]; then
+    rm -f -- "$link"
+    echo "Removed $link."
+  elif [ -e "$link" ]; then
+    echo "ui-scale: $link does not point at this checkout, so ui-scale will not remove it." >&2
+    exit 1
+  else
+    echo "There is no link at $link."
+  fi
+}
+
+case "${1:-}" in
+  enable)
+    enable
+    ;;
+  disable)
+    disable
+    ;;
+  verify)
+    verify
+    ;;
+  status)
+    if [ "${2:-}" = "--quiet" ]; then
+      toggle_installed && shell_size_matches && foot_matches && console_applied
+    else
+      print_status
+    fi
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
+    ;;
+  update)
+    update
+    ;;
+  version | --version)
+    version
+    ;;
+  -h | --help | help)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
