@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="34" viewBox="0 0 320 34" role="img" aria-label="Real-world tested on real hardware">
+  <rect x="0.5" y="0.5" width="319" height="33" rx="16.5" fill="#eafaf1" stroke="#1f9d55"/>
+  <circle cx="19" cy="17" r="8" fill="#1f9d55"/>
+  <path d="M15 17.4l2.7 2.7 5.1-5.5" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="34" y="22" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#3f6b4a">
+    <tspan font-weight="700" fill="#14532d">Real-world tested</tspan>
+    <tspan> on real hardware</tspan>
+  </text>
+</svg>

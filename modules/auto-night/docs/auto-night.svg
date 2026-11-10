@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="300" viewBox="0 0 880 300" role="img" aria-labelledby="title desc">
+  <title id="title">How auto-night works</title>
+  <desc id="desc">At sunrise the desktop switches to the White theme with a pure white wallpaper and night light off. At sunset it switches to the Vantablack theme with a pure black wallpaper and night light at 4000 K. One exact timer follows the local sun.</desc>
+
+  <defs>
+    <marker id="arrow-left" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7b8794"/>
+    </marker>
+    <marker id="arrow-right" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7b8794"/>
+    </marker>
+  </defs>
+
+  <rect x="1" y="1" width="878" height="298" rx="18" fill="#f7f8fa" stroke="#e1e6ec"/>
+
+  <text x="32" y="38" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#7b8794" letter-spacing="1.5">AUTO-NIGHT</text>
+
+  <!-- Daylight lane -->
+  <rect x="32" y="56" width="360" height="186" rx="14" fill="#ffffff" stroke="#d8dee6"/>
+  <circle cx="66" cy="90" r="11" fill="#f6c445"/>
+  <g stroke="#f6c445" stroke-width="2" stroke-linecap="round">
+    <line x1="66" y1="70" x2="66" y2="75"/>
+    <line x1="66" y1="105" x2="66" y2="110"/>
+    <line x1="46" y1="90" x2="51" y2="90"/>
+    <line x1="81" y1="90" x2="86" y2="90"/>
+    <line x1="52" y1="76" x2="55" y2="79"/>
+    <line x1="77" y1="101" x2="80" y2="104"/>
+    <line x1="80" y1="76" x2="77" y2="79"/>
+    <line x1="55" y1="101" x2="52" y2="104"/>
+  </g>
+  <text x="96" y="96" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#1f2933">Daylight</text>
+
+  <rect x="52" y="124" width="16" height="16" rx="3" fill="#ffffff" stroke="#c3ccd8"/>
+  <text x="82" y="137" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#1f2933">White theme</text>
+
+  <rect x="52" y="158" width="16" height="16" rx="3" fill="#ffffff" stroke="#c3ccd8"/>
+  <text x="82" y="171" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#1f2933">Pure white wallpaper</text>
+
+  <circle cx="60" cy="198" r="8" fill="none" stroke="#9aa7b6" stroke-width="2"/>
+  <text x="82" y="204" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#1f2933">Night light off</text>
+
+  <!-- Night lane -->
+  <rect x="488" y="56" width="360" height="186" rx="14" fill="#ffffff" stroke="#d8dee6"/>
+  <circle cx="522" cy="90" r="11" fill="#334155"/>
+  <circle cx="528" cy="85" r="10" fill="#ffffff"/>
+  <text x="552" y="96" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#1f2933">Night</text>
+
+  <rect x="508" y="124" width="16" height="16" rx="3" fill="#0b0b0d" stroke="#0b0b0d"/>
+  <text x="538" y="137" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#1f2933">Vantablack theme</text>
+
+  <rect x="508" y="158" width="16" height="16" rx="3" fill="#0b0b0d" stroke="#0b0b0d"/>
+  <text x="538" y="171" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#1f2933">Pure black wallpaper</text>
+
+  <circle cx="516" cy="198" r="8" fill="#f0a35e"/>
+  <text x="538" y="204" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#1f2933">Night light 4000 K</text>
+
+  <!-- Sunrise and sunset arrows -->
+  <text x="440" y="132" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#5c6b7a">sunrise</text>
+  <line x1="440" y1="144" x2="404" y2="144" stroke="#7b8794" stroke-width="2" marker-end="url(#arrow-left)"/>
+
+  <text x="440" y="190" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#5c6b7a">sunset</text>
+  <line x1="440" y1="178" x2="476" y2="178" stroke="#7b8794" stroke-width="2" marker-end="url(#arrow-right)"/>
+
+  <text x="440" y="272" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" fill="#3f4c5a">One exact timer at your local sun &#183; no polling</text>
+  <text x="440" y="290" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#7b8794">Applied at login, on resume, and the moment the clock syncs</text>
+</svg>

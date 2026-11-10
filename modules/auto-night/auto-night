@@ -1,0 +1,1199 @@
+#!/bin/bash
+# Summary: Switch between the White and Vantablack themes at your local sunrise and sunset.
+set -euo pipefail
+
+# Resolve symlinks so the command works through ~/.local/bin/auto-night.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+repo_dir="$(cd -P -- "$script_dir/../.." && pwd)"
+self="$script_dir/auto-night"
+sun_script="$script_dir/sun.py"
+
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
+state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+state_dir="$state_home/omasetup/auto-night"
+sun_file="$state_dir/sun"
+state_file="$state_dir/state"
+pin_file="$config_dir/omasetup/auto-night.json"
+
+unit_dir="$config_dir/systemd/user"
+session_unit="$unit_dir/auto-night-session.service"
+live_unit="$unit_dir/auto-night-live.service"
+
+bg_root="$config_dir/omarchy/backgrounds"
+theme_bg_state="$state_home/omarchy/theme-backgrounds"
+current_theme_file="$state_home/omarchy/current/theme.name"
+current_bg_link="$state_home/omarchy/current/background"
+
+hyprsunset_conf="$config_dir/hypr/hyprsunset.conf"
+hyprsunset_backup="$state_dir/hyprsunset.conf.before"
+theme_bg_backup="$state_dir/theme-backgrounds.before"
+
+sync_stamp="/run/systemd/timesync/synchronized"
+
+theme_day="white"
+theme_night="vantablack"
+day_background="$bg_root/$theme_day/0-white.png"
+night_background="$bg_root/$theme_night/0-black.png"
+
+# Any clock earlier than this module's first release is provably wrong while
+# the module runs, so it is a safe lower bound that never needs updating.
+min_epoch=1794268800 # 2026-11-10 00:00:00 UTC, the day the module was written
+max_epoch=4102444800 # 2100-01-01 00:00:00 UTC
+
+usage() {
+  local code="${1:-2}"
+  cat >&2 <<'EOF'
+Usage: auto-night <command>
+
+Commands:
+  enable      Turn auto-night on and apply the current theme right away.
+  disable     Turn it off and remove exactly what it added.
+  status      Show where you are, the sun times, and what the module will do.
+  verify      Check that the module is armed and ready.
+  location    Show the location the module uses.
+  location --set LAT,LON   Use this place instead of the automatic choice.
+  location --clear         Go back to the automatic choice.
+  trigger     Apply the current preset now. The timers call this.
+  session     Apply the theme before the desktop starts. Login calls this.
+  live        Set night light after login. Login calls this.
+  synced      Re-check once the clock has synchronized.
+  link        Put the auto-night command on your PATH.
+  unlink      Remove that command.
+  update      Update this checkout.
+  version     Show the installed version.
+
+Examples:
+  auto-night status
+  auto-night enable
+  auto-night location --set 52.23,21.01
+  auto-night disable
+EOF
+  exit "$code"
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "auto-night: Run as your normal user, not as root." >&2
+  exit 1
+fi
+
+# ---- the clock ----
+
+read_clock() {
+  if [ -n "${AUTO_NIGHT_NOW:-}" ]; then
+    NOW="$AUTO_NIGHT_NOW"
+  else
+    printf -v NOW '%(%s)T' -1
+  fi
+}
+
+clock_plausible() {
+  (( NOW >= min_epoch && NOW <= max_epoch ))
+}
+
+read_boot_id() {
+  BOOT_ID=""
+  if [ -r /proc/sys/kernel/random/boot_id ]; then
+    IFS= read -r BOOT_ID </proc/sys/kernel/random/boot_id || true
+  fi
+}
+
+read_uptime() {
+  local value=""
+  if [ -r /proc/uptime ]; then
+    IFS= read -r value </proc/uptime || true
+  fi
+  UPTIME="${value%%.*}"
+  [ -n "$UPTIME" ] || UPTIME=0
+}
+
+# A wall clock that moves while the same boot is running was corrected, so
+# every cached instant is suspect. /proc/uptime includes suspend, so ordinary
+# sleep and resume does not look like a jump.
+check_clock_jump() {
+  local offset delta
+  offset=$(( NOW - UPTIME ))
+  CLOCK_JUMPED=0
+  if [ -n "$boot_id" ] && [ "$boot_id" = "$BOOT_ID" ] && [ -n "$clock_offset" ]; then
+    delta=$(( offset - clock_offset ))
+    delta="${delta#-}"
+    if (( delta > 5 )); then
+      CLOCK_JUMPED=1
+    fi
+  fi
+  clock_offset="$offset"
+  boot_id="$BOOT_ID"
+}
+
+ntp_synced() {
+  local value
+  value=$(busctl get-property org.freedesktop.timedate1 \
+    /org/freedesktop/timedate1 org.freedesktop.timedate1 NTPSynchronized 2>/dev/null) || return 1
+  [ "$value" = "b true" ]
+}
+
+# ---- state ----
+
+load_state() {
+  applied_theme_period=""
+  armed_unit=""
+  armed_epoch=""
+  armed_kind=""
+  clock_offset=""
+  boot_id=""
+  if [ -f "$state_file" ]; then
+    # shellcheck source=/dev/null
+    source "$state_file"
+  fi
+}
+
+load_sun() {
+  zone=""
+  place=""
+  source=""
+  lat=""
+  lon=""
+  generated=""
+  valid_from=""
+  recompute_after=""
+  date_today=""
+  kind_today=""
+  rise_today=""
+  set_today=""
+  kind_tomorrow=""
+  rise_tomorrow=""
+  if [ -f "$sun_file" ]; then
+    # shellcheck source=/dev/null
+    source "$sun_file"
+  fi
+}
+
+save_state() {
+  local tmp="$state_file.tmp.$$"
+  {
+    printf 'applied_theme_period=%q\n' "$applied_theme_period"
+    printf 'armed_unit=%q\n' "$armed_unit"
+    printf 'armed_epoch=%q\n' "$armed_epoch"
+    printf 'armed_kind=%q\n' "$armed_kind"
+    printf 'clock_offset=%q\n' "$clock_offset"
+    printf 'boot_id=%q\n' "$boot_id"
+  } >"$tmp" && mv -f -- "$tmp" "$state_file"
+}
+
+# ---- sun times ----
+
+recompute_sun() {
+  local tmp args=()
+
+  [ -d "$state_dir" ] || mkdir -p -- "$state_dir"
+  if [ -n "${AUTO_NIGHT_NOW:-}" ]; then
+    args+=(--now "$AUTO_NIGHT_NOW")
+  fi
+
+  tmp="$sun_file.tmp.$$"
+  if ! python3 "$sun_script" "${args[@]}" >"$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$sun_file"
+  load_sun
+}
+
+refresh_sun_if_needed() {
+  load_sun
+  if [ -z "$generated" ] || (( NOW < valid_from )) || (( NOW >= recompute_after )); then
+    recompute_sun
+  fi
+}
+
+compute_period() {
+  period=""
+  next_epoch=""
+  next_kind=""
+  case "$kind_today" in
+    midnightSun)
+      period=day
+      next_epoch="$recompute_after"
+      next_kind=recompute
+      ;;
+    polarNight)
+      period=night
+      next_epoch="$recompute_after"
+      next_kind=recompute
+      ;;
+    *)
+      if (( NOW < rise_today )); then
+        period=night
+        next_epoch="$rise_today"
+        next_kind=transition
+      elif (( NOW < set_today )); then
+        period=day
+        next_epoch="$set_today"
+        next_kind=transition
+      else
+        period=night
+        if [ "$kind_tomorrow" = normal ]; then
+          next_epoch="$rise_tomorrow"
+          next_kind=transition
+        else
+          next_epoch="$recompute_after"
+          next_kind=recompute
+        fi
+      fi
+      ;;
+  esac
+
+  case "$period" in
+    day)
+      theme="$theme_day"
+      background="$day_background"
+      nightlight="off"
+      ;;
+    night)
+      theme="$theme_night"
+      background="$night_background"
+      nightlight="on"
+      ;;
+  esac
+}
+
+# The sun cache is only valid for the day it was computed on. A clock that
+# jumped forward can leave a cached transition behind us; recompute once, and
+# if it is still behind, the clock itself is wrong.
+settle_period() {
+  if (( CLOCK_JUMPED )); then
+    rm -f -- "$sun_file"
+    CLOCK_JUMPED=0
+  fi
+  refresh_sun_if_needed || return 1
+  compute_period
+  if [ -n "$next_epoch" ] && (( next_epoch <= NOW )); then
+    rm -f -- "$sun_file"
+    refresh_sun_if_needed || return 1
+    compute_period
+  fi
+  if [ -n "$next_epoch" ] && (( next_epoch <= NOW )); then
+    return 1
+  fi
+}
+
+# ---- applying ----
+
+read_current_theme() {
+  CURRENT_THEME=""
+  if [ -f "$current_theme_file" ]; then
+    IFS= read -r CURRENT_THEME <"$current_theme_file" || true
+  fi
+}
+
+# The theme remembers the background it last used. Point both themes at the
+# module's own wallpapers so a switch never lands on a theme's stock image.
+seed_background_state() {
+  mkdir -p -- "$bg_root/$theme_day" "$bg_root/$theme_night" "$theme_bg_state"
+  printf '%s\n' "$day_background" >"$theme_bg_state/$theme_day"
+  printf '%s\n' "$night_background" >"$theme_bg_state/$theme_night"
+}
+
+# Omarchy's remembered background for a theme is a user choice. Keep the two
+# entries the module touches so disable can put them back exactly.
+backup_theme_backgrounds() {
+  local theme file
+  [ -f "$theme_bg_backup" ] && return 0
+  [ -d "$state_dir" ] || mkdir -p -- "$state_dir"
+  {
+    for theme in "$theme_day" "$theme_night"; do
+      file="$theme_bg_state/$theme"
+      if [ -f "$file" ]; then
+        printf '%s=%s\n' "$theme" "$(cat "$file")"
+      else
+        printf '%s=__absent__\n' "$theme"
+      fi
+    done
+  } >"$theme_bg_backup"
+}
+
+restore_theme_backgrounds() {
+  local theme value file
+
+  if [ -f "$theme_bg_backup" ]; then
+    while IFS='=' read -r theme value; do
+      case "$theme" in
+        "$theme_day" | "$theme_night") ;;
+        *) continue ;;
+      esac
+      file="$theme_bg_state/$theme"
+      if [ "$value" = "__absent__" ]; then
+        rm -f -- "$file"
+      else
+        printf '%s\n' "$value" >"$file"
+      fi
+    done <"$theme_bg_backup"
+    rm -f -- "$theme_bg_backup"
+    return 0
+  fi
+
+  # An older enable left no backup. Drop only entries that point at our files.
+  for theme in "$theme_day" "$theme_night"; do
+    file="$theme_bg_state/$theme"
+    [ -f "$file" ] || continue
+    value=""
+    IFS= read -r value <"$file" || true
+    case "$value" in
+      "$bg_root/$theme"/*) rm -f -- "$file" ;;
+    esac
+  done
+}
+
+apply_theme_pre() {
+  seed_background_state
+  if [ "$CURRENT_THEME" != "$theme" ]; then
+    # No shell exists yet, so update the files and leave the shell alone.
+    OMARCHY_THEME_HEADLESS=1 omarchy theme set "$theme" >/dev/null 2>&1 || return 1
+  fi
+  ln -nsf -- "$background" "$current_bg_link"
+  applied_theme_period="$period"
+}
+
+apply_theme_live() {
+  seed_background_state
+  if [ "$CURRENT_THEME" != "$theme" ]; then
+    # Omarchy swaps the palette and the wallpaper together. The module's
+    # wallpaper has no intro clip, so no intro animation plays.
+    omarchy theme set "$theme" >/dev/null 2>&1 || return 1
+  fi
+  # Cover a theme that was already correct, or a manual background change.
+  omarchy theme bg set "$background" >/dev/null 2>&1 || true
+  applied_theme_period="$period"
+}
+
+hyprsunset_temperature() {
+  local out
+  out=$(hyprctl hyprsunset temperature 2>/dev/null) || return 1
+  out="${out//[!0-9]/}"
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+}
+
+nightlight_apply() {
+  local want="$1" temp
+  temp=$(hyprsunset_temperature) || temp=""
+
+  if [ "$want" = on ]; then
+    if [ -n "$temp" ] && (( temp < 6000 )); then
+      return 0
+    fi
+    omarchy toggle nightlight >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  [ -n "$temp" ] || return 0
+  if (( temp < 6000 )); then
+    omarchy toggle nightlight >/dev/null 2>&1 || true
+  elif (( temp == 6000 )); then
+    # A freshly started hyprsunset, or an identity profile, reports 6000 while
+    # the matrix is already neutral. Omarchy reads 6000 as on, so raise the
+    # reported value and reset the matrix, exactly as the toggle does.
+    hyprctl hyprsunset temperature 6500 >/dev/null 2>&1 || true
+    hyprctl hyprsunset identity >/dev/null 2>&1 || true
+    omarchy-shell -q nightlight refresh >/dev/null 2>&1 || true
+  fi
+}
+
+# hyprsunset applies a profile once, at start. Omarchy ships a 07:00 identity
+# profile, which in winter turns night light off before sunrise. While the
+# module is on, replace every profile with one harmless identity profile, and
+# restore the original byte-for-byte on disable. In polar night there is no
+# daytime, so the single profile holds night light on instead.
+desired_hyprsunset() {
+  if [ "${kind_today:-}" = polarNight ]; then
+    cat <<'EOF'
+# Managed by auto-night while it is enabled. Disable the module to restore the original.
+profile {
+    time = 00:00
+    temperature = 4000
+}
+EOF
+  else
+    cat <<'EOF'
+# Managed by auto-night while it is enabled. Disable the module to restore the original.
+profile {
+    time = 12:00
+    identity = true
+}
+EOF
+  fi
+}
+
+neutralize_hyprsunset() {
+  local tmp tries=0
+
+  [ -f "$hyprsunset_conf" ] || return 0
+  [ -d "$state_dir" ] || mkdir -p -- "$state_dir"
+
+  tmp=$(mktemp -- "$state_dir/hyprsunset.XXXXXX") || return 1
+  desired_hyprsunset >"$tmp"
+  if cmp -s -- "$tmp" "$hyprsunset_conf"; then
+    rm -f -- "$tmp"
+    return 0
+  fi
+
+  if [ ! -f "$hyprsunset_backup" ]; then
+    cp -p -- "$hyprsunset_conf" "$hyprsunset_backup" || {
+      rm -f -- "$tmp"
+      return 1
+    }
+  fi
+
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$hyprsunset_conf" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+
+  # A running hyprsunset still holds the old profiles in memory.
+  if pgrep -x hyprsunset >/dev/null 2>&1; then
+    omarchy-restart-hyprsunset >/dev/null 2>&1 || true
+    while (( tries < 20 )); do
+      hyprsunset_temperature >/dev/null 2>&1 && break
+      sleep 0.1
+      tries=$((tries + 1))
+    done
+  fi
+}
+
+# ---- timers ----
+
+arm_sync_watch() {
+  if systemctl --user is-active auto-night-sync.path >/dev/null 2>&1; then
+    return 0
+  fi
+  # A path unit costs nothing while it waits, and the stamp is created on the
+  # first successful sync. It is removed as soon as the clock is plausible.
+  systemd-run --user --collect --unit=auto-night-sync \
+    --path-property=PathChanged="$sync_stamp" \
+    --property=Type=oneshot \
+    "$self" synced >/dev/null 2>&1 || true
+}
+
+disarm_sync_watch() {
+  systemctl --user stop auto-night-sync.path >/dev/null 2>&1 || true
+  systemctl --user reset-failed auto-night-sync.service >/dev/null 2>&1 || true
+}
+
+arm_next() {
+  local unit
+
+  if [ -n "$armed_unit" ]; then
+    systemctl --user stop "$armed_unit.timer" >/dev/null 2>&1 || true
+    armed_unit=""
+    armed_epoch=""
+    armed_kind=""
+  fi
+
+  [ -n "$next_epoch" ] || return 0
+
+  unit="auto-night-at-$next_epoch"
+  if systemd-run --user --collect --unit="$unit" \
+    --on-calendar="@$next_epoch" \
+    --timer-property=AccuracySec=1us \
+    --property=Type=oneshot \
+    --property=Restart=on-failure \
+    --property=RestartSec=2 \
+    "$self" trigger >/dev/null 2>&1; then
+    armed_unit="$unit"
+    armed_epoch="$next_epoch"
+    armed_kind="$next_kind"
+  fi
+}
+
+# ---- the entry points ----
+
+session() {
+  [ -d "$state_dir" ] || mkdir -p -- "$state_dir"
+  read_clock
+  load_state
+  read_boot_id
+  read_uptime
+  check_clock_jump
+
+  if ! clock_plausible; then
+    arm_sync_watch
+    save_state
+    return 0
+  fi
+
+  if ! settle_period; then
+    arm_sync_watch
+    save_state
+    return 0
+  fi
+
+  read_current_theme
+  if [ "$applied_theme_period" != "$period" ]; then
+    apply_theme_pre || return 1
+  fi
+
+  neutralize_hyprsunset || true
+  arm_next
+
+  if ! ntp_synced; then
+    arm_sync_watch
+  fi
+
+  save_state
+}
+
+live() {
+  [ -d "$state_dir" ] || mkdir -p -- "$state_dir"
+  read_clock
+  load_state
+  read_boot_id
+  read_uptime
+  check_clock_jump
+
+  if ! clock_plausible; then
+    arm_sync_watch
+    save_state
+    return 0
+  fi
+
+  if ! settle_period; then
+    arm_sync_watch
+    save_state
+    return 0
+  fi
+
+  read_current_theme
+  if [ "$applied_theme_period" != "$period" ]; then
+    apply_theme_live || return 1
+  fi
+
+  neutralize_hyprsunset || true
+  # hyprsunset does not survive a logout, so always re-assert the preset.
+  nightlight_apply "$nightlight"
+
+  arm_next
+
+  if ! ntp_synced; then
+    arm_sync_watch
+  fi
+
+  save_state
+}
+
+trigger() {
+  local previous_period
+
+  [ -d "$state_dir" ] || mkdir -p -- "$state_dir"
+  read_clock
+  load_state
+  read_boot_id
+  read_uptime
+  check_clock_jump
+
+  if ! clock_plausible; then
+    arm_sync_watch
+    save_state
+    return 0
+  fi
+
+  if ! settle_period; then
+    arm_sync_watch
+    save_state
+    return 0
+  fi
+
+  previous_period="$applied_theme_period"
+  read_current_theme
+  if [ "$applied_theme_period" != "$period" ]; then
+    apply_theme_live || return 1
+  fi
+
+  neutralize_hyprsunset || true
+  nightlight_apply "$nightlight"
+
+  # A sunrise or sunset that passed without changing the period means the
+  # clock is stale. Recompute before arming again, so a wrong clock cannot
+  # make the timer fire in a tight loop.
+  if [ "$armed_kind" = transition ] && [ -n "$armed_epoch" ] &&
+    (( NOW > armed_epoch + 60 )) && [ "$period" = "$previous_period" ]; then
+    rm -f -- "$sun_file"
+    if settle_period; then
+      read_current_theme
+      if [ "$applied_theme_period" != "$period" ]; then
+        apply_theme_live || return 1
+      fi
+      nightlight_apply "$nightlight"
+    fi
+  fi
+
+  arm_next
+
+  if ! ntp_synced; then
+    arm_sync_watch
+  fi
+
+  save_state
+}
+
+synced() {
+  if hyprland_running; then
+    trigger || true
+  else
+    session || true
+  fi
+  if clock_plausible; then
+    disarm_sync_watch
+  fi
+}
+
+# ---- setup ----
+
+hyprland_running() {
+  command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1
+}
+
+preflight() {
+  if [ ! -f "$OMARCHY_PATH/bin/omarchy" ]; then
+    echo "auto-night: This does not look like an Omarchy system, so there is nothing to configure." >&2
+    exit 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "auto-night: Python 3 is required but was not found." >&2
+    exit 1
+  fi
+  if ! command -v systemd-run >/dev/null 2>&1; then
+    echo "auto-night: systemd-run is required but was not found." >&2
+    exit 1
+  fi
+}
+
+install_assets() {
+  mkdir -p -- "$bg_root/$theme_day" "$bg_root/$theme_night" "$state_dir"
+  install -m 0644 -- "$script_dir/backgrounds/white.png" "$day_background"
+  install -m 0644 -- "$script_dir/backgrounds/vantablack.png" "$night_background"
+}
+
+install_units() {
+  mkdir -p -- "$unit_dir"
+  cat >"$session_unit" <<EOF
+[Unit]
+Description=Auto-night: apply the correct theme before the desktop starts
+Before=graphical-session-pre.target
+After=basic.target
+ConditionPathExists=$self
+
+[Service]
+Type=oneshot
+ExecStart="$self" session
+
+[Install]
+WantedBy=graphical-session-pre.target
+EOF
+
+  cat >"$live_unit" <<EOF
+[Unit]
+Description=Auto-night: set night light after login
+After=graphical-session.target
+ConditionPathExists=$self
+
+[Service]
+Type=oneshot
+ExecStart="$self" live
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+
+  systemctl --user daemon-reload
+}
+
+remove_units() {
+  systemctl --user disable --now auto-night-session.service auto-night-live.service >/dev/null 2>&1 || true
+  rm -f -- "$session_unit" "$live_unit"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+}
+
+stop_transients() {
+  systemctl --user stop 'auto-night-at-*.timer' 'auto-night-at-*.service' >/dev/null 2>&1 || true
+  systemctl --user stop 'auto-night-sync.path' 'auto-night-sync.service' >/dev/null 2>&1 || true
+  systemctl --user reset-failed 'auto-night-at-*.timer' 'auto-night-at-*.service' >/dev/null 2>&1 || true
+  systemctl --user reset-failed 'auto-night-sync.path' 'auto-night-sync.service' >/dev/null 2>&1 || true
+}
+
+restore_hyprsunset() {
+  if [ -f "$hyprsunset_backup" ]; then
+    cp -p -- "$hyprsunset_backup" "$hyprsunset_conf" || return 1
+    rm -f -- "$hyprsunset_backup"
+  fi
+}
+
+remove_assets() {
+  local current keep=""
+
+  # Keep whichever wallpaper is on screen right now, so disabling never blanks
+  # the desktop. The other one is removed.
+  current=$(readlink -f -- "$current_bg_link" 2>/dev/null || true)
+  case "$current" in
+    "$day_background") keep="$theme_day" ;;
+    "$night_background") keep="$theme_night" ;;
+  esac
+  if [ "$keep" != "$theme_day" ]; then
+    rm -f -- "$day_background"
+    rmdir -- "$bg_root/$theme_day" 2>/dev/null || true
+  fi
+  if [ "$keep" != "$theme_night" ]; then
+    rm -f -- "$night_background"
+    rmdir -- "$bg_root/$theme_night" 2>/dev/null || true
+  fi
+}
+
+enable() {
+  preflight
+  install_assets
+  install_units
+  backup_theme_backgrounds
+  seed_background_state
+  stop_transients
+
+  systemctl --user enable auto-night-session.service auto-night-live.service >/dev/null 2>&1 || {
+    echo "auto-night: The systemd user units could not be enabled." >&2
+    exit 1
+  }
+
+  # `enable` starts from a clean state, so it always applies the current
+  # preset even when the module was already on.
+  rm -f -- "$sun_file" "$state_file"
+  load_state
+  next_epoch=""
+
+  if hyprland_running; then
+    live || {
+      echo "auto-night: The theme could not be applied. Run 'auto-night status' to see why." >&2
+      exit 1
+    }
+  else
+    session || {
+      echo "auto-night: The theme could not be applied. Run 'auto-night status' to see why." >&2
+      exit 1
+    }
+  fi
+
+  echo "auto-night is on."
+  echo
+  echo "  The theme follows the sun: White in daylight, Vantablack at night."
+  echo "  Night light is on at 4000 K between sunset and sunrise."
+  if [ -n "${next_epoch:-}" ]; then
+    echo "  The next change is at $(format_time "$next_epoch")."
+  else
+    echo "  The next change will be armed as soon as the clock is correct."
+  fi
+  echo
+  echo "  To see the details, run 'auto-night status'."
+  echo "  To undo everything, run 'auto-night disable'."
+}
+
+disable() {
+  remove_units
+  stop_transients
+  restore_hyprsunset || true
+  restore_theme_backgrounds
+  remove_assets
+  rm -f -- "$sun_file" "$state_file"
+
+  echo "auto-night is off."
+  echo
+  echo "  The theme, the wallpaper, and night light are left as they are now."
+}
+
+# ---- status ----
+
+format_time() {
+  local epoch="${1:-}"
+  if [ -z "$epoch" ]; then
+    printf 'unknown'
+    return
+  fi
+  date -d "@$epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf 'unknown'
+}
+
+format_clock() {
+  local epoch="${1:-}"
+  if [ -z "$epoch" ]; then
+    printf 'none'
+    return
+  fi
+  date -d "@$epoch" '+%H:%M:%S' 2>/dev/null || printf 'none'
+}
+
+# A polar day has no sunrise or sunset at all, which is correct, not broken.
+format_sun_clock() {
+  local epoch="${1:-}"
+  case "${kind_today:-}" in
+    polarNight) printf 'none (polar night)' ;;
+    midnightSun) printf 'none (midnight sun)' ;;
+    *) format_clock "$epoch" ;;
+  esac
+}
+
+format_distance() {
+  local epoch="${1:-}" delta
+  if [ -z "$epoch" ]; then
+    printf 'unknown'
+    return
+  fi
+  delta=$(( epoch - NOW ))
+  if (( delta < 0 )); then
+    printf 'now'
+    return
+  fi
+  if (( delta >= 86400 )); then
+    printf 'in %d d %d h' $((delta / 86400)) $(((delta % 86400) / 3600))
+  elif (( delta >= 3600 )); then
+    printf 'in %d h %d min' $((delta / 3600)) $(((delta % 3600) / 60))
+  else
+    printf 'in %d min' $((delta / 60))
+  fi
+}
+
+units_enabled() {
+  [ "$(systemctl --user is-enabled auto-night-session.service 2>/dev/null || true)" = enabled ] &&
+    [ "$(systemctl --user is-enabled auto-night-live.service 2>/dev/null || true)" = enabled ]
+}
+
+timer_armed() {
+  [ -n "$armed_unit" ] && systemctl --user is-active "$armed_unit.timer" >/dev/null 2>&1
+}
+
+is_enabled() {
+  [ -f "$session_unit" ] && [ -f "$live_unit" ] &&
+    [ -f "$day_background" ] && [ -f "$night_background" ] &&
+    [ -f "$state_file" ] && units_enabled && timer_armed
+}
+
+print_status() {
+  local nightlight_text theme_text timer_text state_text temp
+
+  read_clock
+  load_state
+  read_boot_id
+  read_uptime
+  check_clock_jump
+
+  echo "auto-night"
+  echo
+
+  if ! settle_period; then
+    echo "  Location        The location could not be resolved."
+    echo "  State           The module is not working."
+    return
+  fi
+
+  read_current_theme
+
+  echo "  Location        $place ($source)"
+  echo "  Coordinates     $lat, $lon"
+  echo "  Sunrise today   $(format_sun_clock "$rise_today")"
+  echo "  Sunset today    $(format_sun_clock "$set_today")"
+  echo "  Right now       $period, so $theme with night light $nightlight."
+  echo "  Next change     $(format_time "$next_epoch") ($(format_distance "$next_epoch"))"
+  echo
+
+  if [ "$CURRENT_THEME" = "$theme" ]; then
+    theme_text="${CURRENT_THEME^}."
+  elif [ -z "$CURRENT_THEME" ]; then
+    theme_text="Unknown."
+  else
+    theme_text="${CURRENT_THEME^}, not ${theme^}. The module changes it at the next transition."
+  fi
+  echo "  Theme           $theme_text"
+
+  temp=$(hyprsunset_temperature) || temp=""
+  if [ -z "$temp" ]; then
+    nightlight_text="Off, because hyprsunset is not running."
+  elif (( temp < 6000 )); then
+    nightlight_text="On at $temp K."
+  else
+    nightlight_text="Off."
+  fi
+  echo "  Night light     $nightlight_text"
+
+  if timer_armed; then
+    timer_text="Armed for $(format_time "$armed_epoch")."
+  elif [ -n "$armed_unit" ]; then
+    timer_text="The timer $armed_unit is not running."
+  else
+    timer_text="No timer is armed."
+  fi
+  echo "  Timer           $timer_text"
+
+  if [ -f "$session_unit" ] && [ -f "$live_unit" ] && units_enabled; then
+    echo "  Units           Installed and enabled."
+  elif [ -f "$session_unit" ] || [ -f "$live_unit" ]; then
+    echo "  Units           Installed, but not enabled."
+  else
+    echo "  Units           Not installed."
+  fi
+
+  if [ -f "$hyprsunset_backup" ]; then
+    echo "  hyprsunset      The 07:00 profile is disabled while the module is on."
+  else
+    echo "  hyprsunset      No profile was changed."
+  fi
+
+  if is_enabled; then
+    state_text="The module is on."
+  elif [ -f "$session_unit" ] || [ -f "$state_file" ]; then
+    state_text="The module is partly on."
+  else
+    state_text="The module is off."
+  fi
+  echo "  State           $state_text"
+}
+
+verify() {
+  local failed=0
+
+  read_clock
+  load_state
+  read_boot_id
+  read_uptime
+  check_clock_jump
+
+  if [ ! -f "$session_unit" ] || [ ! -f "$live_unit" ]; then
+    echo "auto-night: The systemd units are not installed." >&2
+    failed=1
+  elif ! units_enabled; then
+    echo "auto-night: The systemd units are installed but not enabled." >&2
+    failed=1
+  else
+    echo "auto-night: The systemd units are installed and enabled."
+  fi
+
+  if [ ! -f "$day_background" ] || [ ! -f "$night_background" ]; then
+    echo "auto-night: The wallpapers are not installed." >&2
+    failed=1
+  else
+    echo "auto-night: The wallpapers are installed."
+  fi
+
+  if settle_period; then
+    case "$kind_today" in
+      polarNight)
+        echo "auto-night: $date_today is polar night, so there is no sunrise or sunset."
+        ;;
+      midnightSun)
+        echo "auto-night: $date_today is midnight sun, so there is no sunrise or sunset."
+        ;;
+      *)
+        if (( rise_today > 0 && set_today > 0 && rise_today < set_today )); then
+          echo "auto-night: Sunrise is $(format_time "$rise_today") and sunset is $(format_time "$set_today")."
+        else
+          echo "auto-night: The sun times look wrong for $date_today." >&2
+          failed=1
+        fi
+        ;;
+    esac
+  else
+    echo "auto-night: The sun times could not be computed." >&2
+    failed=1
+  fi
+
+  if timer_armed; then
+    echo "auto-night: The next change is armed for $(format_time "$armed_epoch")."
+  else
+    echo "auto-night: No timer is armed for the next change." >&2
+    failed=1
+  fi
+
+  return "$failed"
+}
+
+# ---- location ----
+
+print_location() {
+  local tmp
+  tmp=$(mktemp) || return 1
+  if ! python3 "$sun_script" >"$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    echo "auto-night: The location could not be resolved." >&2
+    return 1
+  fi
+  (
+    # shellcheck disable=SC1090
+    source "$tmp"
+    echo "Location      $place"
+    echo "Source        $source"
+    echo "Coordinates   $lat, $lon"
+    echo "Timezone      $zone"
+  )
+  rm -f -- "$tmp"
+}
+
+location_command() {
+  local value lat lon tmp
+  case "${1:-}" in
+    "")
+      print_location
+      ;;
+    --set)
+      value="${2:-}"
+      if [[ ! "$value" =~ ^-?[0-9]+([.][0-9]+)?,-?[0-9]+([.][0-9]+)?$ ]]; then
+        echo "auto-night: Give the location as LAT,LON, for example 52.23,21.01." >&2
+        exit 1
+      fi
+      lat="${value%%,*}"
+      lon="${value##*,}"
+      if ! awk -v a="$lat" -v b="$lon" 'BEGIN { exit !(a >= -90 && a <= 90 && b >= -180 && b <= 180) }'; then
+        echo "auto-night: The latitude must be between -90 and 90 and the longitude between -180 and 180." >&2
+        exit 1
+      fi
+      mkdir -p -- "$(dirname -- "$pin_file")"
+      tmp="$pin_file.tmp.$$"
+      printf '{\n  "lat": %s,\n  "lon": %s\n}\n' "$lat" "$lon" >"$tmp"
+      mv -f -- "$tmp" "$pin_file"
+      rm -f -- "$sun_file"
+      echo "auto-night uses $lat, $lon from now on."
+      print_location
+      if is_enabled; then
+        trigger || true
+      fi
+      ;;
+    --clear)
+      rm -f -- "$pin_file"
+      rm -f -- "$sun_file"
+      echo "auto-night is back to the automatic location."
+      print_location
+      if is_enabled; then
+        trigger || true
+      fi
+      ;;
+    *)
+      echo "auto-night: Unknown location option: $1" >&2
+      exit 2
+      ;;
+  esac
+}
+
+# ---- housekeeping ----
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'auto-night %s\n' \
+      "$(git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed.")"
+  else
+    echo "auto-night unknown: this is not a git checkout."
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "auto-night: This is not a git checkout. Download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  version
+}
+
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/auto-night"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "auto-night: $link already exists and is not a symlink, so auto-night will not overwrite it." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$script_dir/auto-night" ]; then
+    echo "auto-night: $link points to another checkout, so auto-night will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$script_dir/auto-night" "$link"
+  echo "Linked $link to $script_dir/auto-night."
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run 'auto-night enable' to turn it on." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $script_dir/auto-night directly." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/auto-night"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$script_dir/auto-night" ]; then
+    rm -f -- "$link"
+    echo "Removed $link."
+  elif [ -e "$link" ]; then
+    echo "auto-night: $link does not point at this checkout, so auto-night will not remove it." >&2
+    exit 1
+  else
+    echo "There is no link at $link."
+  fi
+}
+
+case "${1:-}" in
+  enable)
+    enable
+    ;;
+  disable)
+    disable
+    ;;
+  status)
+    if [ "${2:-}" = "--quiet" ]; then
+      read_clock
+      load_state
+      is_enabled
+    else
+      print_status
+    fi
+    ;;
+  verify)
+    verify
+    ;;
+  location)
+    shift
+    location_command "$@"
+    ;;
+  trigger)
+    trigger
+    ;;
+  session)
+    session
+    ;;
+  live)
+    live
+    ;;
+  synced)
+    synced
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
+    ;;
+  update)
+    update
+    ;;
+  version | --version)
+    version
+    ;;
+  -h | --help | help)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
