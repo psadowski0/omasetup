@@ -457,14 +457,37 @@ neutralize_hyprsunset() {
     return 1
   }
 
-  # A running hyprsunset still holds the old profiles in memory.
+  # A running hyprsunset still holds the old profiles in memory. Omarchy's
+  # restart helper kills it and relaunches at once, and the relaunch can lose
+  # the race for the socket and exit. Wait for the old process to go, then make
+  # sure a fresh one answers before leaving.
   if pgrep -x hyprsunset >/dev/null 2>&1; then
+    local old_pids pid alive
+    old_pids=$(pgrep -x hyprsunset || true)
     omarchy-restart-hyprsunset >/dev/null 2>&1 || true
+
+    tries=0
+    while (( tries < 50 )); do
+      alive=0
+      for pid in $old_pids; do
+        kill -0 "$pid" 2>/dev/null && alive=1
+      done
+      (( alive )) || break
+      sleep 0.1
+      tries=$((tries + 1))
+    done
+
+    tries=0
     while (( tries < 20 )); do
       hyprsunset_temperature >/dev/null 2>&1 && break
       sleep 0.1
       tries=$((tries + 1))
     done
+
+    # If the restart lost the race and night light should be on, start it.
+    if ! pgrep -x hyprsunset >/dev/null 2>&1 && [ "${nightlight:-}" = on ]; then
+      omarchy toggle nightlight >/dev/null 2>&1 || true
+    fi
   fi
 }
 

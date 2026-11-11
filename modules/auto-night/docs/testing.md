@@ -33,7 +33,7 @@ suite covers:
 | Check | Result |
 |---|---|
 | Warsaw 2026-11-11, sunrise and sunset (UTC) | 05:49:41 / 14:50:17 ✅ |
-| Quito, an equatorial city | 10:54:06 / 23:01:32 ✅ |
+| Quito, an equatorial city | 10:54:12 / 23:01:39 ✅ |
 | Sydney, southern hemisphere | 18:46:20 / 08:31:57 ✅ |
 | Warsaw DST spring-forward day is 23 hours | ✅ |
 | Tromsø 2026-12-21 is polar night | ✅ |
@@ -93,6 +93,12 @@ Notable behaviours the sandbox proves:
   entry the module created.
 
 `bash -n` and ShellCheck 0.10.0 with `-S warning` pass.
+
+A separate race test reproduces Omarchy's `omarchy-restart-app` behaviour: the
+helper kills `hyprsunset` and relaunches at once, and the relaunch can lose the
+socket race and exit. v0.6.0 left night light off in that case. v0.6.1 waits for
+the old process to exit, then starts a fresh one if the race still lost. The
+test fails on v0.6.0 and passes on v0.6.1.
 
 ### 3. The real machine
 

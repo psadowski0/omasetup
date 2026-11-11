@@ -125,7 +125,8 @@ Tested on 11 November 2026 on real hardware: Framework Laptop 13, Omarchy
 
 A disposable sandbox ran 82 checks on the command and 16 checks on the sun
 logic. The sun logic was also compared with the world clock's own JavaScript
-across 384 cases, with zero mismatches.
+across 384 cases, with zero mismatches. A separate race test covers Omarchy's
+hyprsunset restart; it caught a race in v0.6.0 that v0.6.1 fixes.
 
 On the real machine:
 
