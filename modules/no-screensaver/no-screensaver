@@ -1,0 +1,329 @@
+#!/bin/bash
+# Summary: Turn off the Omarchy screensaver, like "Screensaver Off" in the menu.
+set -euo pipefail
+
+# Resolve symlinks so the command works through ~/.local/bin/no-screensaver.
+source_path="${BASH_SOURCE[0]}"
+while [ -L "$source_path" ]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+repo_dir="$(cd -P -- "$script_dir/../.." && pwd)"
+
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+
+# Omarchy's toggle scripts hardcode $HOME/.local/state, so the flag must go
+# there even when XDG_STATE_HOME points somewhere else.
+toggle_dir="$HOME/.local/state/omarchy/toggles"
+toggle_file="$toggle_dir/screensaver-off"
+state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+module_state_dir="$state_home/omasetup/no-screensaver"
+backup_file="$module_state_dir/screensaver-off.before"
+marker='# omasetup: no-screensaver'
+
+usage() {
+  local code="${1:-2}"
+  cat >&2 <<'EOF'
+Usage: no-screensaver <command>
+
+Commands:
+  enable    Turn the Omarchy screensaver off.
+  disable   Turn it back on, or restore the state from before enable.
+  status    Show whether the screensaver is off.
+  verify    Check that the screensaver is off and this module manages it.
+  link      Put the no-screensaver command on your PATH.
+  unlink    Remove that command.
+  update    Update this checkout.
+  version   Show the installed version.
+
+Examples:
+  no-screensaver status
+  no-screensaver enable
+  no-screensaver disable
+EOF
+  exit "$code"
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "no-screensaver: Run as your normal user, not as root." >&2
+  exit 1
+fi
+
+# Omarchy's menu toggle writes this file and omarchy-launch-screensaver reads it.
+mechanism_supported() {
+  [ -f "$OMARCHY_PATH/bin/omarchy-launch-screensaver" ] &&
+    [ -f "$OMARCHY_PATH/bin/omarchy-toggle-enabled" ] &&
+    grep -qF 'screensaver-off' "$OMARCHY_PATH/bin/omarchy-launch-screensaver"
+}
+
+screensaver_off() {
+  [ -e "$toggle_file" ]
+}
+
+# The marker makes it clear that this module wrote the flag, so disable can
+# remove it without touching a flag the user set through the menu.
+owned() {
+  [ -f "$toggle_file" ] && [ ! -L "$toggle_file" ] &&
+    [ "$(head -n 1 -- "$toggle_file" 2>/dev/null || true)" = "$marker" ]
+}
+
+is_enabled() {
+  owned
+}
+
+write_toggle() {
+  local tmp
+
+  mkdir -p -- "$toggle_dir"
+  tmp=$(mktemp -- "$toggle_dir/.no-screensaver.XXXXXX") ||
+    {
+      echo "no-screensaver: The toggle file could not be created in $toggle_dir." >&2
+      return 1
+    }
+
+  if ! cat > "$tmp" <<'EOF'
+# omasetup: no-screensaver
+# This file turns the Omarchy screensaver off, like "Screensaver Off" in the menu.
+EOF
+  then
+    rm -f -- "$tmp"
+    echo "no-screensaver: The toggle file could not be written." >&2
+    return 1
+  fi
+
+  chmod 0644 -- "$tmp"
+  mv -fT -- "$tmp" "$toggle_file" || {
+    rm -f -- "$tmp"
+    echo "no-screensaver: The toggle file could not be installed." >&2
+    return 1
+  }
+}
+
+backup_toggle() {
+  mkdir -p -- "$module_state_dir"
+  cp -p -- "$toggle_file" "$backup_file"
+}
+
+cleanup_state() {
+  rm -f -- "$backup_file"
+  rmdir --ignore-fail-on-non-empty -- "$module_state_dir" 2>/dev/null || true
+}
+
+enable() {
+  local preexisting=0
+
+  if ! mechanism_supported; then
+    echo "no-screensaver: This Omarchy version does not use the screensaver-off toggle, so the screensaver cannot be turned off." >&2
+    exit 1
+  fi
+
+  if [ -L "$toggle_file" ]; then
+    echo "no-screensaver: $toggle_file is a symlink, so no-screensaver will not replace it." >&2
+    exit 1
+  fi
+
+  if [ -e "$toggle_file" ] && [ ! -f "$toggle_file" ]; then
+    echo "no-screensaver: $toggle_file is not a regular file, so no-screensaver will not replace it." >&2
+    exit 1
+  fi
+
+  if owned; then
+    echo "The Omarchy screensaver is already off."
+    echo "The module is on."
+    return 0
+  fi
+
+  if [ -e "$toggle_file" ]; then
+    preexisting=1
+    backup_toggle
+  else
+    # A backup from an earlier enable is stale if the flag has since been
+    # removed, for example through the menu. The next disable should turn the
+    # screensaver on rather than restoring that old state.
+    cleanup_state
+  fi
+
+  write_toggle
+
+  echo "The Omarchy screensaver is off."
+  echo "  It will not start when the screen is idle."
+  echo "  The screen still locks."
+  if (( preexisting )); then
+    echo "  It was already off before this module was enabled, so 'no-screensaver disable' will leave it off."
+  else
+    echo "  To turn the screensaver back on, run 'no-screensaver disable'."
+  fi
+}
+
+disable() {
+  if [ -L "$toggle_file" ]; then
+    echo "no-screensaver: $toggle_file is a symlink, so no-screensaver will not remove it." >&2
+    exit 1
+  fi
+
+  if [ -e "$toggle_file" ] && [ ! -f "$toggle_file" ]; then
+    echo "no-screensaver: $toggle_file is not a regular file, so no-screensaver will not remove it." >&2
+    exit 1
+  fi
+
+  if [ ! -e "$toggle_file" ]; then
+    cleanup_state
+    echo "The Omarchy screensaver is already on."
+    return 0
+  fi
+
+  if ! owned; then
+    cleanup_state
+    echo "no-screensaver: The screensaver was turned off outside this module, so no-screensaver will not turn it back on." >&2
+    exit 1
+  fi
+
+  if [ -e "$backup_file" ]; then
+    mv -fT -- "$backup_file" "$toggle_file"
+    echo "The Omarchy screensaver is off, as it was before no-screensaver was enabled."
+  else
+    rm -f -- "$toggle_file"
+    echo "The Omarchy screensaver is on again."
+  fi
+
+  cleanup_state
+}
+
+print_status() {
+  echo "no-screensaver"
+  echo
+
+  if screensaver_off; then
+    echo "  Screensaver      Off. It will not start when the screen is idle."
+  else
+    echo "  Screensaver      On. Omarchy starts it after the idle time set in shell.json."
+  fi
+
+  echo "  Lock             Unchanged. The screen still locks after the idle time set in shell.json."
+
+  if owned; then
+    echo "  State            The module is on."
+  elif screensaver_off; then
+    echo "  State            The module is off. The screensaver was turned off outside this module."
+  else
+    echo "  State            The module is off."
+  fi
+}
+
+verify() {
+  local failed=0
+
+  if ! mechanism_supported; then
+    echo "no-screensaver: This Omarchy version does not use the screensaver-off toggle." >&2
+    failed=1
+  fi
+
+  if ! screensaver_off; then
+    echo "no-screensaver: The Omarchy screensaver is still on. Run 'no-screensaver enable' to turn it off." >&2
+    failed=1
+  elif ! owned; then
+    echo "no-screensaver: The screensaver is off, but not through this module." >&2
+    failed=1
+  else
+    echo "no-screensaver: The Omarchy screensaver is off and this module manages it."
+  fi
+
+  return "$failed"
+}
+
+version() {
+  if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'no-screensaver %s\n' \
+      "$(git -C "$repo_dir" describe --tags --always --dirty 2>/dev/null || echo "unknown: git describe failed.")"
+  else
+    echo "no-screensaver unknown: this is not a git checkout."
+  fi
+}
+
+update() {
+  if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "no-screensaver: This is not a git checkout. Download a fresh copy instead." >&2
+    exit 1
+  fi
+
+  git -C "$repo_dir" pull --ff-only
+  version
+}
+
+link_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/no-screensaver"
+
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "no-screensaver: $link already exists and is not a symlink, so no-screensaver will not overwrite it." >&2
+    exit 1
+  fi
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" != "$script_dir/no-screensaver" ]; then
+    echo "no-screensaver: $link points to another checkout, so no-screensaver will not overwrite it." >&2
+    exit 1
+  fi
+
+  mkdir -p -- "$bin_dir"
+  ln -sfn -- "$script_dir/no-screensaver" "$link"
+  echo "Linked $link to $script_dir/no-screensaver."
+
+  case ":$PATH:" in
+    *":$bin_dir:"*) echo "Run 'no-screensaver enable' to turn the screensaver off." ;;
+    *) echo "Warning: $bin_dir is not on your PATH. Add it, or run $script_dir/no-screensaver directly." >&2 ;;
+  esac
+}
+
+unlink_command() {
+  local bin_dir link
+  bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  link="$bin_dir/no-screensaver"
+
+  if [ -L "$link" ] && [ "$(readlink -f -- "$link")" = "$script_dir/no-screensaver" ]; then
+    rm -f -- "$link"
+    echo "Removed $link."
+  elif [ -e "$link" ]; then
+    echo "no-screensaver: $link does not point at this checkout, so no-screensaver will not remove it." >&2
+    exit 1
+  else
+    echo "There is no link at $link."
+  fi
+}
+
+case "${1:-}" in
+  enable)
+    enable
+    ;;
+  disable)
+    disable
+    ;;
+  verify)
+    verify
+    ;;
+  status)
+    if [ "${2:-}" = "--quiet" ]; then
+      if is_enabled; then exit 0; else exit 1; fi
+    fi
+    print_status
+    ;;
+  link)
+    link_command
+    ;;
+  unlink)
+    unlink_command
+    ;;
+  update)
+    update
+    ;;
+  version | --version)
+    version
+    ;;
+  -h | --help | help)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
